@@ -412,6 +412,13 @@ fn start_bridge(app: &tauri::AppHandle, state: &AppState) -> xdl_core::Result<()
     )?;
 
     state.port.store(bridge.port(), Ordering::Relaxed);
+    // Worth saying out loud in the log: when a script will not connect, the
+    // first question is always "which port is it actually on", and the answer
+    // is otherwise invisible in a windowed build with no console.
+    eprintln!(
+        "xitter-dl: capture bridge listening on http://127.0.0.1:{}",
+        bridge.port()
+    );
     if let Ok(mut slot) = state.bridge.lock() {
         *slot = Some(bridge);
     }

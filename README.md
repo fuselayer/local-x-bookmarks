@@ -259,6 +259,16 @@ a documented one.
   .NET sends it by default for POSTs and will otherwise wait out its own
   timeout against a server that never replies.
 
+- **A note on what could not be verified here.** The app-side bridge wiring
+  (start on launch, emit progress events) compiles and is exercised by
+  `cargo check`, but it could not be run: Tauri creates the window *before*
+  invoking the user's setup closure (`tauri-2.12.1/src/app.rs:2691`), so on a
+  host where WebView2 cannot start, the process panics before the bridge is
+  reached. Nothing about the wiring is known to be wrong — it is simply
+  unreachable in that environment. This is the practical argument for
+  `xdl bridge`: the receiver is identical, and it runs anywhere a terminal
+  does.
+
 - **Read commands open their own SQLite connection.** A single
   `Mutex<Library>` would serialise every search behind every import, which
   defeats the WAL pragma. Writes take a mutex; reads do not.
