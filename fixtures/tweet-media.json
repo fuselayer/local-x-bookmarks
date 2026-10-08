@@ -1,0 +1,136 @@
+{
+  "data": {
+    "tweetResult": {
+      "result": {
+        "__typename": "TweetWithVisibilityResults",
+        "tweet": {
+          "__typename": "Tweet",
+          "rest_id": "1843712994563928100",
+          "core": {
+            "user_results": {
+              "result": {
+                "__typename": "User",
+                "rest_id": "2234567890",
+                "is_blue_verified": false,
+                "verification": { "verified": true, "verified_type": "blue" },
+                "core": { "name": "Marguerite", "screen_name": "marguerite" },
+                "avatar": {
+                  "image_url": "https://pbs.twimg.com/profile_images/1111111111111111111/placeholder_normal.jpg"
+                },
+                "legacy": {
+                  "name": "Marguerite",
+                  "screen_name": "marguerite",
+                  "profile_image_url_https": "https://pbs.twimg.com/profile_images/1111111111111111111/placeholder_normal.jpg",
+                  "verified": true
+                }
+              }
+            }
+          },
+          "legacy": {
+            "id_str": "1843712994563928100",
+            "full_text": "Four shots from the Portland trip 🎞️ — all straight off the camera, no edits. Threading the best ones here so I can find them again. Shot on @ilfordphoto HP5. #filmphotography",
+            "created_at": "Sun Sep 14 09:03:11 +0000 2025",
+            "lang": "en",
+            "conversation_id_str": "1843712994563928100",
+            "in_reply_to_status_id_str": null,
+            "in_reply_to_screen_name": null,
+            "favorite_count": 8921,
+            "retweet_count": 640,
+            "reply_count": 132,
+            "quote_count": 58,
+            "bookmark_count": 1120,
+            "entities": {
+              "hashtags": [{ "text": "filmphotography", "indices": [160, 176] }],
+              "urls": [],
+              "user_mentions": [
+                {
+                  "screen_name": "ilfordphoto",
+                  "name": "ILFORD PHOTO",
+                  "id_str": "55555555",
+                  "indices": [142, 154]
+                }
+              ],
+              "symbols": [],
+              "media": [
+                { "media_url_https": "https://pbs.twimg.com/media/AAAAAA111/photo1.jpg", "type": "photo", "indices": [176, 176] }
+              ]
+            },
+            "extended_entities": {
+              "media": [
+                {
+                  "id_str": "1900000000000000001",
+                  "type": "photo",
+                  "media_url_https": "https://pbs.twimg.com/media/AAAAAA111/photo1.jpg",
+                  "ext_alt_text": "A rain-slicked Portland street at dusk, neon signs reflecting in the puddles.",
+                  "original_info": { "width": 2400, "height": 1600 },
+                  "sizes": { "large": { "w": 2048, "h": 1365, "resize": "fit" } }
+                },
+                {
+                  "id_str": "1900000000000000002",
+                  "type": "photo",
+                  "media_url_https": "https://pbs.twimg.com/media/AAAAAA111/photo2.jpg",
+                  "ext_alt_text": "A tram crossing a bridge, motion-blurred, shot on black and white film.",
+                  "original_info": { "width": 1600, "height": 2400 },
+                  "sizes": { "large": { "w": 1365, "h": 2048, "resize": "fit" } }
+                },
+                {
+                  "id_str": "1900000000000000003",
+                  "type": "photo",
+                  "media_url_https": "https://pbs.twimg.com/media/AAAAAA111/photo3.jpg",
+                  "ext_alt_text": null,
+                  "original_info": { "width": 2400, "height": 1600 },
+                  "sizes": { "large": { "w": 2048, "h": 1365, "resize": "fit" } }
+                },
+                {
+                  "id_str": "1900000000000000004",
+                  "type": "photo",
+                  "media_url_https": "https://pbs.twimg.com/media/AAAAAA111/photo4.jpg",
+                  "ext_alt_text": "Contact sheet: twelve frames, three of them circled in red grease pencil.",
+                  "original_info": { "width": 2400, "height": 1600 },
+                  "sizes": { "large": { "w": 2048, "h": 1365, "resize": "fit" } }
+                }
+              ]
+            }
+          },
+          "views": { "count": "412887", "state": "Enabled" },
+          "quoted_status_result": {
+            "result": {
+              "__typename": "Tweet",
+              "rest_id": "1843712994563928000",
+              "core": {
+                "user_results": {
+                  "result": {
+                    "__typename": "User",
+                    "rest_id": "3333333333",
+                    "is_blue_verified": false,
+                    "core": { "name": "Portland Film Lab", "screen_name": "pdxfilmlab" },
+                    "legacy": {
+                      "name": "Portland Film Lab",
+                      "screen_name": "pdxfilmlab",
+                      "profile_image_url_https": "https://pbs.twimg.com/profile_images/2222222222222222222/placeholder_normal.jpg"
+                    }
+                  }
+                }
+              },
+              "legacy": {
+                "id_str": "1843712994563928000",
+                "full_text": "Reminder: we develop HP5 at box speed on Tuesdays and Thursdays. Push processing by request.",
+                "created_at": "Sat Sep 13 17:40:02 +0000 2025",
+                "lang": "en",
+                "conversation_id_str": "1843712994563928000",
+                "in_reply_to_status_id_str": null,
+                "favorite_count": 96,
+                "retweet_count": 12,
+                "reply_count": 4,
+                "quote_count": 1,
+                "bookmark_count": 7,
+                "entities": { "hashtags": [], "urls": [], "user_mentions": [], "symbols": [] }
+              },
+              "views": { "count": "3410", "state": "Enabled" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

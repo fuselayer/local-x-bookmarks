@@ -1,0 +1,16 @@
+# pnpm 11 reads build-script permissions from here. Its own error message
+# points at `pnpm approve-builds`, which is interactive; declaring it here
+# instead keeps a fresh clone reproducible and CI non-interactive.
+#
+# esbuild is the one dependency that genuinely needs a postinstall — it places
+# its platform binary, without which vite cannot start. pnpm blocks build
+# scripts by default for supply-chain safety, which is the right default, so
+# this is a deliberate single exception rather than a blanket `true`.
+#
+# `packages: ['.']` keeps this directory self-contained instead of letting pnpm
+# walk up and adopt the Rust workspace root as a monorepo.
+packages:
+  - '.'
+
+allowBuilds:
+  esbuild: true

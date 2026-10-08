@@ -1,0 +1,241 @@
+/*
+ * X's visual language, reproduced.
+ *
+ * Every value in this file was chosen to match x.com's web client, not to look
+ * nice. Where a number looks arbitrary (15px, 20px, 13px, 16px radius) it is
+ * arbitrary on X too, and matching it is the point — the brief is "exactly like
+ * it appears on X", so this is a transcription job, not a design job.
+ */
+
+/* ── The Chirp typeface ────────────────────────────────────────────────────
+ *
+ * READ THIS BEFORE ADDING FONT FILES TO THE REPO.
+ *
+ * Chirp is not free. Its own name table says so:
+ *
+ *     copyright  : "Copyright © 2021 by Noel Leu and Grilli Type.
+ *                   All rights reserved."
+ *     trademark  : "The Chirp and Chirp Display typeface names are
+ *                   trademarks of Twitter, Inc."
+ *     description: "Chirp and Chirp Display are customized versions of
+ *                   GT America created exclusively for Twitter."
+ *
+ * It is a commercial typeface from Grilli Type, licensed to X, and the
+ * "chirp-font" repositories floating around GitHub are unauthorised
+ * redistributions of it. Committing those files here would put
+ * all-rights-reserved software in a public repo.
+ *
+ * So the @font-face rules below are committed and the FONT FILES ARE NOT.
+ * That combination is deliberate and safe in both directions:
+ *
+ *   - With no font files present, these declarations simply fail to load and
+ *     the stack falls through to the system font. No error, no layout shift,
+ *     no broken build.
+ *   - Anyone who legitimately has Chirp — a licensed copy, or a local file
+ *     they supplied themselves — drops it in `ui/public/fonts/` and gets the
+ *     real thing with no code change. That directory is gitignored.
+ *
+ * If you want a font that can actually ship, use one you are allowed to
+ * redistribute. `--font` below lists the fallbacks in priority order.
+ */
+@font-face {
+  font-family: 'TwitterChirp';
+  src: url('/fonts/Chirp-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TwitterChirp';
+  src: url('/fonts/Chirp-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TwitterChirp';
+  src: url('/fonts/Chirp-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'TwitterChirp';
+  src: url('/fonts/Chirp-Heavy.woff2') format('woff2');
+  /* X maps Chirp Heavy to 800, not 900. */
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* ── Themes ────────────────────────────────────────────────────────────────
+ *
+ * The three themes X actually ships. Names and hex values match X's own
+ * settings screen: "Lights out" is pure black, "Dim" is the navy one, and
+ * "Default" is light. Selecting one sets a class on <html>.
+ */
+
+.theme-lights-out {
+  --bg: #000000;
+  --bg-elevated: #16181c;
+  --bg-hover: rgba(255, 255, 255, 0.03);
+  --bg-active: rgba(255, 255, 255, 0.06);
+  --text-primary: #e7e9ea;
+  --text-secondary: #71767b;
+  --border: #2f3336;
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
+  --like: #f91880;
+  --repost: #00ba7c;
+  --overlay: rgba(91, 112, 131, 0.4);
+}
+
+.theme-dim {
+  --bg: #15202b;
+  --bg-elevated: #1e2732;
+  --bg-hover: rgba(255, 255, 255, 0.03);
+  --bg-active: rgba(255, 255, 255, 0.06);
+  --text-primary: #ffffff;
+  --text-secondary: #8b98a5;
+  --border: #38444d;
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
+  --like: #f91880;
+  --repost: #00ba7c;
+  --overlay: rgba(91, 112, 131, 0.4);
+}
+
+.theme-light {
+  --bg: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(15, 20, 25, 0.03);
+  --bg-active: rgba(15, 20, 25, 0.06);
+  --text-primary: #0f1419;
+  --text-secondary: #536471;
+  --border: #cfd9de;
+  --accent: #1d9bf0;
+  --accent-hover: #1a8cd8;
+  --like: #f91880;
+  --repost: #00ba7c;
+  --overlay: rgba(91, 112, 131, 0.4);
+}
+
+/* ── Type ──────────────────────────────────────────────────────────────────
+ *
+ * The font stack is X's own, minus the webfont at the front. `TwitterChirp`
+ * is left in place deliberately: if a user happens to have it installed, they
+ * get the real thing for free.
+ */
+
+:root {
+  --font: 'TwitterChirp', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Menlo, Consolas,
+    monospace;
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────────
+ *
+ * X's scrollbars are near-invisible until hovered. Matching that matters more
+ * than it sounds: a chunky default scrollbar immediately reads as "not X".
+ */
+
+.scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* ── Shared primitives ─────────────────────────────────────────────────── */
+
+.muted {
+  color: var(--text-secondary);
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* X's tiny dividing dot, used between handle and timestamp. */
+.dot-sep::before {
+  content: '·';
+  padding: 0 4px;
+  color: var(--text-secondary);
+}
+
+.hairline {
+  border-bottom: 1px solid var(--border);
+}

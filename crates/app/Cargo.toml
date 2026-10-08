@@ -1,0 +1,30 @@
+[package]
+name = "xitter-dl-app"
+description = "xitter-dl desktop shell — a Tauri window that binds loopback and renders."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "xitter-dl"
+path = "src/main.rs"
+
+[lib]
+name = "xdl_app"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+xdl_core = { package = "xitter-dl-core", path = "../core" }
+tauri = { version = "2", features = [] }
+serde.workspace = true
+serde_json.workspace = true
+rusqlite.workspace = true
+
+[features]
+# Tauri's own custom-protocol switch. `tauri build` turns it on; a plain
+# `cargo build` leaves it off because the frontend is served from disk in dev.
+custom-protocol = ["tauri/custom-protocol"]

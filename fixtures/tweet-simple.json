@@ -1,0 +1,98 @@
+{
+  "data": {
+    "tweetResult": {
+      "result": {
+        "__typename": "Tweet",
+        "rest_id": "1843712994563928064",
+        "core": {
+          "user_results": {
+            "result": {
+              "__typename": "User",
+              "rest_id": "1234567890",
+              "is_blue_verified": true,
+              "verification": { "verified": false, "verified_type": "blue" },
+              "core": {
+                "name": "Ada Lovelace",
+                "screen_name": "adalovelace"
+              },
+              "avatar": {
+                "image_url": "https://pbs.twimg.com/profile_images/0000000000000000000/placeholder_normal.jpg"
+              },
+              "legacy": {
+                "name": "Ada Lovelace",
+                "screen_name": "adalovelace",
+                "profile_image_url_https": "https://pbs.twimg.com/profile_images/0000000000000000000/placeholder_normal.jpg",
+                "verified": false,
+                "verified_type": "blue"
+              }
+            }
+          }
+        },
+        "legacy": {
+          "id_str": "1843712994563928064",
+          "full_text": "Spent the weekend building a local-first archive of my own X bookmarks. No API, no cloud, no scraping service — a userscript rides along in the browser and files away responses the page already fetched.\n\nThe write-up is at https://t.co/bvExample1 if you want the long version. Thanks to @prinsss for proving the interception approach years ago. #localfirst",
+          "created_at": "Wed Oct 08 14:12:30 +0000 2025",
+          "lang": "en",
+          "conversation_id_str": "1843712994563928064",
+          "in_reply_to_status_id_str": null,
+          "in_reply_to_screen_name": null,
+          "favorite_count": 1284,
+          "retweet_count": 213,
+          "reply_count": 47,
+          "quote_count": 19,
+          "bookmark_count": 302,
+          "entities": {
+            "hashtags": [{ "text": "localfirst", "indices": [345, 356] }],
+            "urls": [
+              {
+                "url": "https://t.co/bvExample1",
+                "expanded_url": "https://example.com/local-first-bookmarks",
+                "display_url": "example.com/local-first-book…",
+                "indices": [223, 246]
+              }
+            ],
+            "user_mentions": [
+              {
+                "screen_name": "prinsss",
+                "name": "prinsss",
+                "id_str": "987654321",
+                "indices": [287, 295]
+              }
+            ],
+            "symbols": []
+          },
+          "extended_entities": { "media": [] }
+        },
+        "views": { "count": "48213", "state": "Enabled" },
+        "card": {
+          "name": "summary_large_image",
+          "legacy": {
+            "binding_values": [
+              { "key": "title", "value": { "string_value": "A local-first archive of your own X bookmarks" } },
+              {
+                "key": "description",
+                "value": {
+                  "string_value": "Rust, Tauri, SQLite FTS5, and a userscript that originates zero additional requests to X."
+                }
+              },
+              {
+                "key": "card_url",
+                "value": { "string_value": "https://example.com/local-first-bookmarks" }
+              },
+              {
+                "key": "summary_photo_image_original",
+                "value": {
+                  "image_value": {
+                    "url": "https://pbs.twimg.com/card_img/0000000000000000000/placeholder",
+                    "width": 1200,
+                    "height": 630
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

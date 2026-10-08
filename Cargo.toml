@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli", "crates/app"]
+# Toolchain probes and scratch builds live here. Excluded so they neither
+# join the workspace nor force a `[workspace]` table in every scratch manifest.
+exclude = [".scratch"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.82"
+repository = "https://github.com/example/xitter-dl"
+
+[workspace.dependencies]
+# SQLite is compiled from source rather than linked against a system library.
+#
+# NOTE: there is no `fts5` feature in rusqlite — an earlier draft of the PRD
+# asserted one and it does not exist. FTS5 comes from the bundled build's
+# compile flags: libsqlite3-sys's bundled path passes
+# `-DSQLITE_ENABLE_FTS5` (along with FTS3, RTREE, JSON1, STAT4) directly to
+# the C compiler. So `bundled` alone is what we need, and it also gives us the
+# `trigram` tokenizer (SQLite >= 3.34) that the substring/CJK retriever
+# depends on.
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# `time` over `chrono`: X's date format is fixed-width and `time` describes it
+# exactly with a compile-time-checked format string, with no tz database.
+#
+# `local-offset` is NOT a default feature, and without it
+# `UtcOffset::current_local_offset()` does not exist. We need it because X
+# renders timestamps in the viewer's local zone and the CLI should agree with
+# the app. It is explicitly not sound to call from a multithreaded program,
+# which is why `format_local` treats failure as "fall back to UTC" rather than
+# assuming it worked.
+time = { version = "0.3", features = ["macros", "parsing", "formatting", "local-offset"] }
+
+sha2 = "0.10"
+anyhow = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Debug builds of a from-source SQLite are painfully slow; give dependencies
+# full optimization even in dev so importing is not glacial.
+[profile.dev.package."*"]
+opt-level = 2

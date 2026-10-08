@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "xitter-dl",
+  "version": "0.1.0",
+  "identifier": "dev.xitterdl.desktop",
+
+  "build": {
+    "frontendDist": "../../ui/dist",
+    "devUrl": "http://localhost:5273",
+    "beforeDevCommand": "pnpm --dir ../../ui dev",
+    "beforeBuildCommand": "pnpm --dir ../../ui build"
+  },
+
+  "app": {
+    "windows": [
+      {
+        "title": "xitter-dl",
+        "width": 1320,
+        "height": 880,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "theme": null
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; form-action 'none'; object-src 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost ws://localhost:5273 http://localhost:5273; form-action 'none'; object-src 'none'; base-uri 'none'"
+    }
+  },
+
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi", "dmg", "appimage", "deb"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Your X bookmarks, offline and searchable.",
+    "longDescription": "A local-first library for your X bookmarks. Ingested by a companion userscript that rides along in your own browser, stored in a single SQLite file, searchable offline in milliseconds. No API, no cloud, no account."
+  }
+}

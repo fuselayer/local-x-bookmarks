@@ -1,0 +1,14 @@
+# Windows is the primary dev host here. Without normalisation a fresh clone on
+# a machine with a different core.autocrlf shows every file as modified.
+* text=auto
+
+# These only ever run on Windows, so keep them CRLF in the working tree.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets: never diff, never normalise.
+*.png  binary
+*.ico  binary
+*.icns binary
+*.woff2 binary
+*.sqlite binary

@@ -1,0 +1,22 @@
+[package]
+name = "xitter-dl-cli"
+description = "`xdl` — dogfood the whole xitter-dl pipeline from a terminal, before and without the GUI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "xdl"
+path = "src/main.rs"
+
+[dependencies]
+# `package` is required: the manifest name is `xitter-dl-core` but its lib
+# target is `xdl_core`. A path dependency must name the *package*, and the
+# rename keeps `use xdl_core::…` working.
+xdl_core = { package = "xitter-dl-core", path = "../core" }
+anyhow.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+
+[dev-dependencies]

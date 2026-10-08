@@ -1,0 +1,34 @@
+# Build output
+/target
+**/target
+
+# Sandbox-relocated toolchain state (see scripts/dev-env.ps1)
+/.cargo-home
+/.pnpm-home
+/.pnpm-store
+/.scratch
+
+# Node
+node_modules
+/ui/dist
+/ui/.svelte-kit
+
+# Chirp is a commercial typeface owned by Grilli Type and licensed to X.
+# It is NOT redistributable, and this repo deliberately does not carry it.
+# Drop your own copy here if you have one; the @font-face rules in
+# ui/src/styles/x.css will pick it up and otherwise fall back cleanly.
+/ui/public/fonts
+
+# Local library data — never commit a user's bookmarks
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+/data
+/exports
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea

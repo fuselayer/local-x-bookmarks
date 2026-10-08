@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en" class="theme-lights-out">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>xitter-dl</title>
+    <!--
+      No external font, stylesheet, or script is loaded here, and that is a
+      product requirement rather than an omission. X serves its Chirp typeface
+      from abs.twimg.com; fetching it would be an app-originated request to an
+      X-owned host, which PRD §7.1 forbids outright. We therefore render in the
+      closest system stack instead. See src/styles/x.css for what that costs us.
+    -->
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
