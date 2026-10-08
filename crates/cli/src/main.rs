@@ -26,6 +26,9 @@ COMMANDS:
     search <QUERY...>    Full-text search across the library.
     show <ID>            Print one post in full.
     stats                Counts for the library.
+    bridge               Run the capture receiver in the foreground: the same
+                         loopback endpoint the desktop app runs, without the
+                         window. Prints a pairing code and logs each capture.
     paths                Print where the database lives.
 
 OPTIONS:
@@ -104,11 +107,122 @@ fn run() -> Result<()> {
         "search" => cmd_search(&lib, rest, limit, json),
         "show" => cmd_show(&lib, rest, json),
         "stats" => cmd_stats(&lib, json),
+        "bridge" => cmd_bridge(&path, rest),
         "paths" => {
             println!("{}", path.display());
             Ok(())
         }
         other => bail!("unknown command `{other}`\n\n{USAGE}"),
+    }
+}
+
+/// Run the capture receiver in the foreground.
+///
+/// This is the same [`xdl_core::bridge`] the desktop app starts, minus the
+/// window. It exists for two reasons, and both matter:
+///
+/// 1. **"My script will not connect" should be diagnosable without a GUI.** You
+///    can run this, watch requests arrive, and see exactly which one is refused
+///    and why.
+/// 2. **It makes the whole capture path testable without a webview.** The app
+///    and this command share the receiver, the pairing state and the ingest
+///    path, so an end-to-end run here exercises everything except the window.
+fn cmd_bridge(db_path: &std::path::Path, _rest: &[String]) -> Result<()> {
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use xdl_core::bridge::{
+        format_code, Bridge, BridgeEvent, BridgeOptions, Ingest, Notify, Pairing,
+    };
+
+    let state_path = db_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("bridge.json");
+
+    let existing = std::fs::read_to_string(&state_path).ok();
+    let (pairing, _created) = Pairing::load_or_generate(existing.as_deref())?;
+    let pairing = Arc::new(Mutex::new(pairing));
+
+    let persist = |p: &Pairing| {
+        if let Ok(json) = p.to_json() {
+            let _ = std::fs::write(&state_path, json);
+        }
+    };
+    persist(&pairing.lock().unwrap());
+
+    // The receiver writes, so it owns its own connection rather than borrowing
+    // the one `run` opened for the read commands.
+    let writer = Arc::new(Mutex::new(db::Library::open(db_path)?));
+    let ingest: Ingest = Arc::new(move |text: &str, now: i64| {
+        let mut lib = writer
+            .lock()
+            .map_err(|_| xdl_core::Error::invalid("database lock poisoned"))?;
+        let tx = lib.conn_mut().transaction()?;
+        let summary = xdl_core::import::ndjson::import_str(&tx, text, now)?;
+        tx.commit()?;
+        Ok(summary)
+    });
+
+    let notify: Notify = Arc::new(|event| match event {
+        BridgeEvent::Paired { label, .. } => match label {
+            Some(l) => println!("paired with {l}"),
+            None => println!("paired"),
+        },
+        BridgeEvent::Captured(r) => {
+            println!(
+                "captured: {} seen, {} new, {} updated{}",
+                r.seen,
+                r.new,
+                r.updated,
+                if r.problems.is_empty() {
+                    String::new()
+                } else {
+                    format!(", {} problem(s)", r.problems.len())
+                }
+            );
+            for p in &r.problems {
+                eprintln!("  ! {p}");
+            }
+        }
+        BridgeEvent::Rejected { reason, .. } => eprintln!("rejected: {reason}"),
+    });
+
+    let bridge = Bridge::start(Arc::clone(&pairing), ingest, notify, BridgeOptions::default())?;
+
+    println!("listening on http://127.0.0.1:{}", bridge.port());
+    println!("database   {}", db_path.display());
+    println!();
+
+    // Re-show the code as it rotates, so a code is always on screen — the same
+    // property the app's pairing panel has, for the same reason: a code that is
+    // valid while invisible is a code nobody is watching.
+    //
+    // This loop is the whole program from here on. Ctrl-C is the exit; there is
+    // no graceful shutdown to perform beyond the process going away, which
+    // closes the listening socket with it.
+    let mut shown = String::new();
+    loop {
+        let now = xdl_core::now();
+        let (code, label) = {
+            let mut p = pairing.lock().map_err(|_| anyhow::anyhow!("state poisoned"))?;
+            let code = p.show_code(now)?;
+            (code, p.paired_label.clone())
+        };
+
+        if code != shown {
+            persist(&pairing.lock().unwrap());
+            match label {
+                Some(l) => println!("pairing code {}  (paired with {l})", format_code(&code)),
+                None => println!("pairing code {}", format_code(&code)),
+            }
+            shown = code;
+        }
+
+        std::thread::sleep(Duration::from_secs(1));
+        // Touch the bridge so it cannot be dropped by an over-eager optimiser,
+        // and surface the address if the port ever changes underneath us.
+        let _ = bridge.port();
     }
 }
 

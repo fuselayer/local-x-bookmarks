@@ -11,6 +11,7 @@
 //! | [`x`] | Understanding what X sent us |
 //! | [`db`] | Storing and retrieving it |
 //! | [`import`] | Getting bytes in from files |
+//! | [`bridge`] | Getting bytes in from the userscript, over loopback |
 //! | [`search`] | Finding things again |
 //! | [`model`] | The contract with the frontend |
 //!
@@ -20,11 +21,13 @@
 //!    therefore applies retroactively to everything already captured, with no
 //!    migration and no re-capture (PRD §9.2). If you are about to store a
 //!    parsed value where a raw one would do, stop.
-//! 2. **Nothing in this crate originates a request to X.** No HTTP client is
+//! 2. **Nothing in this crate originates a request to X.** No HTTP *client* is
 //!    linked. That is not an accident of scope; it is the §4.3 boundary, and
 //!    a dependency added here that can open a socket to an X-owned host is a
-//!    product change, not a refactor.
+//!    product change, not a refactor. [`bridge`] is the mirror image and does
+//!    not weaken this: it *listens* on loopback and never dials out.
 
+pub mod bridge;
 pub mod db;
 pub mod error;
 pub mod import;

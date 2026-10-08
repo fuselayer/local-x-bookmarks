@@ -2,9 +2,9 @@
 # a machine with a different core.autocrlf shows every file as modified.
 * text=auto
 
-# These only ever run on Windows, so keep them CRLF in the working tree.
+# cmd.exe misparses an LF-only batch file, emitting spurious "not recognized"
+# errors and sometimes executing the wrong fragment. This one is not cosmetic.
 *.cmd text eol=crlf
-*.ps1 text eol=crlf
 
 # Binary assets: never diff, never normalise.
 *.png  binary

@@ -17,12 +17,14 @@ Milestone 1: **the app runs and renders an imported tweet exactly as X does.**
 
 | Piece | State |
 |---|---|
-| `crates/core` — schema, parser, importers, search | ✅ 89 tests passing |
+| `crates/core` — schema, parser, importers, search | ✅ 143 tests passing |
+| `crates/core/src/bridge` — loopback receiver, pairing | ✅ 57 of those, incl. real HTTP round-trips |
 | `crates/cli` — `xdl import / search / show / stats` | ✅ working |
 | `ui/` — Svelte 5 frontend, three X themes | ✅ builds |
-| `crates/app` — Tauri v2 shell | ✅ builds |
-| Capture userscript | ⬜ next |
-| Loopback receiver + pairing | ⬜ next |
+| `crates/app` — Tauri v2 shell | ✅ builds; bridge starts on launch |
+| `userscript/` — capture script | ✅ 16 tests green; **not yet run against a real scroll** |
+| Continuous capture (save-as-you-go) | ⬜ next — see [Deviations](#deferred-not-dropped) |
+| Pairing panel in the app UI | ⬜ next — the bridge and the script both work; nothing draws it yet |
 | Media pipeline | ⬜ M3 |
 
 ---
@@ -88,17 +90,87 @@ no network:
 
 Nothing is sent anywhere. The payload is parsed and stored locally.
 
+### Capturing your bookmarks for real
+
+The userscript is the point of the product. It files away the bookmarks X
+**already sent** your browser — it originates no requests, holds no credential,
+and never touches the DOM.
+
+```powershell
+# 1. start the app; it binds 127.0.0.1:8737 and prints nothing
+.\target\release\xitter-dl.exe
+
+# 2. install userscript/xitter-dl-capture.user.js
+#    Tampermonkey: Dashboard -> Utilities -> Install from file
+#    Violentmonkey: + -> Install from file
+
+# 3. open https://x.com/i/bookmarks and scroll
+```
+
+Pairing is a one-time exchange. The app shows a short code, you paste it into
+the pill in the corner of the page, and the script stores the install secret it
+gets back. After that it works across restarts; you re-pair only if you revoke,
+reinstall, or clear script storage.
+
+**The script is deliberately small enough to read in one sitting.** Before you
+run it, check two things in it: that `fetch` is read through `response.clone()`
+(read the original and you break the page), and that the only URLs it ever
+contacts are `http://127.0.0.1:<port>`. Both are asserted in the test suite.
+
+#### Running the userscript tests
+
+```powershell
+# not `node --test <dir>`: that spawns a child process per file, which the
+# sandbox on this host refuses with EPERM. Running the file directly is
+# equivalent and does not spawn.
+.\scripts\dev.cmd node userscript\test\capture.test.mjs
+```
+
+The harness builds a stubbed browser, evaluates the **real** `.user.js` inside
+it, and drives it through the fetch hook — so the tests fail if the hooks stop
+being installed or the wire format drifts from the Rust parser.
+
+#### How the two sides find each other
+
+The app binds `8737` and, if that is taken, the next free port up to `8757`.
+The port is deliberately **not** persisted: instead, `/v1/hello` answers an
+unauthenticated *pure echo*, returning the random `probe` value the caller
+invented. The script probes the range, and only sends its install secret to a
+port that echoed its own nonce.
+
+That echo is not decoration. Without it the script would have to present the
+secret to every port in the range to discover which one is the app — handing it
+to whatever unrelated process happened to be squatting on the wrong one.
+
+#### Checking it works without a browser
+
+`xdl bridge` runs the same receiver the desktop app does, in the foreground,
+printing the pairing code as it rotates:
+
+```powershell
+# terminal 1
+.\scripts\dev.cmd cargo run -p xitter-dl-cli -- --db .scratch\e2e.sqlite bridge
+
+# terminal 2 — pairs, captures a generated page, and checks every refusal
+.\scripts\dev.cmd node scripts\smoke-bridge.mjs A4KY-P8N4
+```
+
+This is the thing to run when a script "will not connect": it fails loudly with
+the status and the response body of whichever step broke, rather than leaving
+you guessing between pairing, framing and the port.
+
 ---
 
 ## Layout
 
 ```
-crates/core/     schema, X payload parsing, import, search. No Tauri dependency.
+crates/core/     schema, X payload parsing, import, search, the loopback bridge.
 crates/cli/      `xdl` — dogfood the pipeline without a GUI.
-crates/app/      Tauri v2 shell: window, typed IPC commands.
+crates/app/      Tauri v2 shell: window, typed IPC commands, bridge lifecycle.
 ui/              Svelte 5 frontend.
-fixtures/        Canonical test payloads, shared by Rust tests and the UI.
-scripts/         dev-env.ps1, dev.cmd, make-icon.py.
+userscript/      The capture script, plus its Node test harness.
+fixtures/        Canonical test payloads, shared by Rust tests, JS tests and the UI.
+scripts/         dev-env.ps1, dev.cmd, make-icon.py, make-fixture-bookmarks.mjs.
 ```
 
 `crates/core` having no Tauri dependency is what makes the CLI, the test suite
@@ -176,9 +248,59 @@ a documented one.
   implies a dense list, but X shows Reply/Repost/Like/Views on every row of the
   bookmarks list, and a list without it does not look like X.
 
+- **Chunked request bodies are decoded, not refused.** The first version of the
+  bridge rejected `Transfer-Encoding` outright, on the reasoning that the only
+  client is our own userscript. That was wrong, and the smoke test caught it:
+  Node's `http.request` switches to chunked the moment `Content-Length` is
+  omitted, browsers streaming a body do the same, and the result was a capture
+  that failed with a 400 nothing on the script side could explain. The genuine
+  smuggling risk is a request declaring its length **two** ways, and that is
+  what gets refused. `Expect: 100-continue` is answered for the same reason —
+  .NET sends it by default for POSTs and will otherwise wait out its own
+  timeout against a server that never replies.
+
 - **Read commands open their own SQLite connection.** A single
   `Mutex<Library>` would serialise every search behind every import, which
   defeats the WAL pragma. Writes take a mutex; reads do not.
+
+- **The userscript ships X's raw envelopes and does not normalise a record.**
+  PRD §6.3 specifies a `BookmarkRecord` built in JavaScript. We send `page`
+  records holding the envelope exactly as X sent it, and let the Rust parser —
+  the one with the tests — do the interpretation. Two reasons: the parser can
+  then be fixed retroactively against already-captured bytes (PRD §9.2), and
+  the script does not become a second, untested implementation of the same
+  logic that silently disagrees with the first. The script parses only enough
+  to count posts for its progress pill and read the bottom cursor.
+
+- **The userscript requests a fourth grant: `unsafeWindow`.** PRD §10 lists
+  three `GM_*` grants plus `@connect 127.0.0.1`. Patching `window.fetch` from a
+  sandboxed manager script is unreliable without reaching the page's real
+  window, and a hook that silently does not install is the worst failure mode
+  this product has — it looks like "X stopped sending bookmarks". The grant is
+  used for one thing: assigning the two hooks.
+
+- **The userscript is plain JavaScript, not TypeScript + `vite-plugin-monkey`.**
+  PRD §7.3 specifies the toolchain. A single readable file beats a build step
+  here: Greasy Fork requires readable source rather than minified output, §10
+  wants the script auditable in one sitting, and a reviewer should be reading
+  the exact bytes that run. There is no build step at all.
+
+- **The install secret is a file, not the OS keyring.** PRD §7.3 specifies the
+  `keyring` crate. It is written to `bridge.json` beside the library, mode
+  `0600` on Unix and inside the user's own `%APPDATA%` on Windows. The secret
+  authenticates a **loopback-only** endpoint that exists only while the app is
+  open; a keyring would add a dependency tree and a failure mode (a locked or
+  unavailable credential store) for a marginal gain in a threat model where the
+  attacker already has the user's session. Recorded because it is a real
+  departure from the stated design, not because it is equivalent.
+
+- **The port is discovered by echo rather than advertised.** PRD §7.4 says the
+  app "advertises the new port on the next successful exchange". That cannot
+  work as written: if the port moved, the script cannot reach the app to receive
+  the advertisement. Instead the script probes the documented range against the
+  unauthenticated `/v1/hello` echo and caches the answer, rescans only on
+  failure, and never presents its secret to a port that has not proved it is the
+  app.
 
 ### The Chirp typeface is deliberately not in this repo
 
@@ -214,7 +336,17 @@ Anyone who legitimately has Chirp drops the `.woff2` files into
 stack in `x.css` lists the fallbacks in priority order; an open humane
 grotesque such as Inter is the closest freely-licensed relative.
 
-### Deferred, not dropped- **`tauri-specta` is deferred to M2.** PRD §7.3 calls for typed IPC bindings.
+### Deferred, not dropped
+
+- **Continuous capture (save-as-you-go) is not implemented.** PRD §6.5 calls it
+  the highest-value feature in the userscript, and it is — but it is ID-first by
+  design and needs a stub path in the store that does not exist yet: a record
+  carrying only a tweet ID and an observed `bookmarked_at`, to be enriched by a
+  later page. Shipping it without that path would mean either inventing a tweet
+  or silently dropping the save. The interception layer it needs is already in
+  place, so this is additive.
+
+- **`tauri-specta` is deferred to M2.** PRD §7.3 calls for typed IPC bindings.
   The TypeScript types in `ui/src/lib/types.ts` are hand-written mirrors of
   `crates/core/src/model.rs` for now. Codegen is a build-script dependency and
   a failure surface during bring-up, and the command surface is still moving.

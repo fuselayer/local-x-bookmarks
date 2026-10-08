@@ -42,6 +42,12 @@ time = { version = "0.3", features = ["macros", "parsing", "formatting", "local-
 sha2 = "0.10"
 anyhow = "1"
 
+# Used only by the bridge, to draw pairing codes and the install secret from
+# the OS CSPRNG. Deliberately not `rand`: we need exactly one operation —
+# "fill this buffer with unpredictable bytes" — and `rand` brings a generator
+# stack and a feature surface we would then have to reason about.
+getrandom = "0.3"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
