@@ -57,12 +57,20 @@ export function formatDetailTimestamp(unixSeconds: number | null): string {
   return `${time} · ${date}`;
 }
 
-/** The short form used in timeline rows. */
-export function formatShortTimestamp(unixSeconds: number | null): string {
+/**
+ * The short form used in timeline rows.
+ *
+ * `nowMs` is a parameter rather than a call to `Date.now()` on purpose. A
+ * relative label only re-renders when something reactive changes, so reading
+ * the clock inside the function produced a value that was correct when painted
+ * and then silently froze — `3h` stayed `3h` until an unrelated update
+ * happened to repaint the row. Taking `now` from a subscribed clock instead
+ * makes "3h" become "4h" when it should.
+ */
+export function formatShortTimestamp(unixSeconds: number | null, nowMs = Date.now()): string {
   if (!unixSeconds) return '';
   const d = new Date(unixSeconds * 1000);
-  const now = Date.now();
-  const ageMs = now - d.getTime();
+  const ageMs = nowMs - d.getTime();
   const minutes = ageMs / 60_000;
 
   if (minutes < 1) return 'now';
@@ -76,7 +84,7 @@ export function formatShortTimestamp(unixSeconds: number | null): string {
 
   // Past a week X shows the date, and adds the year only when it is not the
   // current one.
-  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const sameYear = d.getFullYear() === new Date(nowMs).getFullYear();
   return d.toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',

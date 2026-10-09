@@ -21,6 +21,7 @@
   import TweetCard from './TweetCard.svelte';
   import ActionBar from './ActionBar.svelte';
   import { formatDetailTimestamp, formatShortTimestamp, formatObservedSave } from './format';
+  import { clockNow } from './clock.svelte';
 
   interface Props {
     post: PostView;
@@ -62,7 +63,7 @@
           </time>
         {:else}
           <time class="handle" datetime={new Date(t.createdAt * 1000).toISOString()}>
-            {formatShortTimestamp(t.createdAt)}
+            {formatShortTimestamp(t.createdAt, clockNow())}
           </time>
         {/if}
       {/if}
