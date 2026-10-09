@@ -88,6 +88,15 @@
     // still see the pill; if x.com loads here and not with it true, the hooks
     // are the problem and the UI is exonerated.
     hookNetwork: true,
+
+    // Routes where the network hooks are allowed to exist at all.
+    //
+    // Reported symptom: x.com failed to load on a status page while the
+    // bookmarks timeline was fine. The hooks can only ever be useful on the
+    // timeline; everywhere else they are risk with no benefit, so the fix is
+    // for them to not be there. X is a single-page app, so this is evaluated
+    // on navigation, not only at load — see `syncRouteHook`.
+    bookmarkRoutes: ['/i/bookmarks'],
   };
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -457,6 +466,92 @@
     }
   }
 
+  // ── hook lifetime ──────────────────────────────────────────────────────────
+  //
+  // The hooks exist only while the bookmarks timeline is on screen, and are
+  // removed when it is not. Two reasons, and the second is the important one:
+  //
+  //   1. They are only useful there. Every other route gets the risk and none
+  //      of the benefit.
+  //   2. They are the one thing in this file that can stop x.com loading, and
+  //      a page-breaking bug that only shows up on routes you were not testing
+  //      deserves more caution than a tidy implementation.
+
+  let hooked = false;
+  let savedOriginals = null;
+
+  function routeAllowsHooks() {
+    try {
+      const p = W.location && W.location.pathname;
+      if (typeof p !== 'string') return false;
+      return CFG.bookmarkRoutes.some((r) => p === r || p.startsWith(r + '/'));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installHooks() {
+    if (hooked) return;
+    // Captured before anything is replaced, so leaving the route can put back
+    // exactly what was there rather than a wrapper around a wrapper.
+    try {
+      const proto = W.XMLHttpRequest && W.XMLHttpRequest.prototype;
+      savedOriginals = {
+        fetch: W.fetch,
+        open: proto && proto.open,
+        send: proto && proto.send,
+      };
+    } catch (_) {
+      savedOriginals = null;
+    }
+    hookFetch();
+    hookXhr();
+    hooked = true;
+    log.info('hooks installed');
+  }
+
+  function removeHooks() {
+    if (!hooked) return;
+    if (savedOriginals) {
+      try {
+        if (savedOriginals.fetch) W.fetch = savedOriginals.fetch;
+      } catch (_) {}
+      try {
+        const proto = W.XMLHttpRequest && W.XMLHttpRequest.prototype;
+        if (proto && savedOriginals.open) proto.open = savedOriginals.open;
+        if (proto && savedOriginals.send) proto.send = savedOriginals.send;
+      } catch (_) {}
+    }
+    hooked = false;
+    log.info('hooks removed');
+  }
+
+  /**
+   * Keep the hooks in step with the current route.
+   *
+   * Polled rather than driven by `popstate`, because x.com's client-side
+   * navigation does not reliably announce itself and a 500 ms lag is invisible
+   * here: the timeline's first request happens after the route settles, so the
+   * hooks are always installed before there is anything to catch.
+   */
+  function syncRouteHook() {
+    let path = null;
+    const check = () => {
+      let p;
+      try {
+        p = W.location.pathname;
+      } catch (_) {
+        return;
+      }
+      if (p === path) return;
+      path = p;
+      if (routeAllowsHooks()) installHooks();
+      else removeHooks();
+    };
+    check();
+    setInterval(check, 500);
+  }
+
   // ── transport: loopback only ───────────────────────────────────────────────
 
   function gmRequest(opts) {
@@ -781,6 +876,10 @@
       input.spellcheck = false;
       const button = W.document.createElement('button');
       button.textContent = 'Pair';
+      // Explicit, because the default for a <button> is "submit". There is no
+      // form here today, and this is what keeps that from mattering if one ever
+      // ends up in an ancestor.
+      button.type = 'button';
       const msg = W.document.createElement('div');
 
       const submit = async () => {
@@ -800,7 +899,18 @@
 
       button.addEventListener('click', submit);
       input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') submit();
+        if (e.key !== 'Enter') return;
+        // Stop the event here, and do not let the default action run.
+        //
+        // Reported symptom: entering the code and pressing Enter replaced the
+        // page with `http://<code>/`. The code is hostname-shaped — `M66W-YDPA`
+        // is a perfectly legal hostname — so once the text escaped the input
+        // the browser's URL fixup accepted it and navigated. `preventDefault`
+        // plus stopping propagation (so x.com's own global key handlers never
+        // see it either) is the entire guard.
+        e.preventDefault();
+        e.stopPropagation();
+        submit();
       });
 
       row.appendChild(input);
@@ -811,6 +921,7 @@
     } else {
       const un = W.document.createElement('button');
       un.textContent = 'Unpair this browser';
+      un.type = 'button';
       un.addEventListener('click', () => {
         store.set('secret', null);
         setStatus('needs-pairing');
@@ -902,9 +1013,10 @@
       const allowed = ! (isFirefox && ! canExport);
 
       if (wanted && allowed) {
-        hookFetch();
-        hookXhr();
-        log.info('hooks installed');
+        // Scoped to the bookmarks route, and kept in step with navigation.
+        // `hookFetch()`/`hookXhr()` are the primitives; `syncRouteHook` decides
+        // whether they should be in place at all.
+        syncRouteHook();
       } else if (!allowed) {
         setStatus('error', {
           error: 'firefox: cannot patch fetch safely',

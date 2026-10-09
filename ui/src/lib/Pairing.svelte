@@ -140,12 +140,16 @@
     {#if info.paired}
       <p class="state ok">
         <span class="dot ok"></span>
-        Paired{info.pairedLabel ? ` with ${info.pairedLabel}` : ''}.
+        A secret was issued{#if info.pairedLabel} to {info.pairedLabel}{/if}{#if info.pairedAt}
+          on {new Date(info.pairedAt * 1000).toLocaleDateString()}{/if}.
       </p>
       {#if !showCode}
         <p class="hint">
-          Captures from that browser are filed into this library automatically.
-          Scroll <code>x.com/i/bookmarks</code> and they will appear on the left.
+          Pairing is per browser: the secret lives in that browser's userscript
+          storage, and this panel can only know that one was handed out — not
+          that a browser still holds it. If the pill on x.com says it is not
+          paired, use <strong>Add another browser</strong> rather than unpairing.
+          That issues a fresh code and leaves the browsers that already work alone.
         </p>
         <div class="row">
           <button class="ghost" onclick={addBrowser}>Add another browser</button>

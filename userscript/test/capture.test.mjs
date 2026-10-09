@@ -65,6 +65,10 @@ function makeWorld({ fetchImpl, xhrImpl } = {}) {
         throw new Error('this stub has no DOM');
       },
     },
+    // The hooks are scoped to the bookmarks timeline, so this world has to say
+    // it is on it. See `syncRouteHook` in the script, and the route tests in
+    // pill.test.mjs for the other half of that behaviour.
+    location: { pathname: '/i/bookmarks' },
     MutationObserver: class {
       observe() {}
       disconnect() {}

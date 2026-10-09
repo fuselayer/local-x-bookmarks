@@ -107,7 +107,7 @@ const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/130.0
  * @param {boolean} o.exported   Whether `exportFunction` exists, as on Firefox.
  * @param {object}  o.stored     GM storage, e.g. { hookNetwork: false }.
  */
-function boot({ firefox = false, exported = false, stored = {} } = {}) {
+function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookmarks' } = {}) {
   const dom = makeDom();
   const values = new Map(Object.entries(stored));
   const messages = [];
@@ -125,6 +125,7 @@ function boot({ firefox = false, exported = false, stored = {} } = {}) {
       },
     },
     navigator: { userAgent: firefox ? FIREFOX_UA : CHROME_UA },
+    location: { pathname: path },
     document: dom.doc,
     MutationObserver: class {
       observe() {}
@@ -301,4 +302,32 @@ test('a stored debug flag turns the gated logger on', () => {
     messages.some(([, m]) => m.includes('hooks installed')),
     'debug logging should be on when the stored flag says so'
   );
+});
+
+test('no hooks are installed anywhere except the bookmarks route', () => {
+  // The reported failure: x.com would not load on a status page while the
+  // bookmarks timeline was fine. The hooks can only be useful on the timeline,
+  // so on every other route the correct number of page objects to patch is
+  // zero.
+  for (const path of ['/', '/home', '/Empty_America/status/2108336792508473546', '/i/history']) {
+    const { win, originals } = boot({ path });
+    assert.equal(win.fetch, originals.fetch, `fetch must be untouched on ${path}`);
+    assert.equal(
+      win.XMLHttpRequest.prototype.open,
+      originals.xhrOpen,
+      `XHR.open must be untouched on ${path}`
+    );
+    assert.equal(
+      win.XMLHttpRequest.prototype.send,
+      originals.xhrSend,
+      `XHR.send must be untouched on ${path}`
+    );
+  }
+});
+
+test('the bookmarks route does get hooked', () => {
+  for (const path of ['/i/bookmarks', '/i/bookmarks/folder/123']) {
+    const { win, originals } = boot({ path });
+    assert.notEqual(win.fetch, originals.fetch, `fetch should be hooked on ${path}`);
+  }
 });
