@@ -428,11 +428,63 @@ fn start_bridge(app: &tauri::AppHandle, state: &AppState) -> xdl_core::Result<()
 /// Event name the frontend listens on for live capture progress.
 pub const BRIDGE_EVENT: &str = "xdl://bridge";
 
+// `user32!MessageBoxW`, declared by hand so that reporting a startup failure
+// costs no dependency. Linked at module scope because `#[link]` is not reliably
+// honoured on an `extern` block nested inside a function body. A doc comment
+// cannot be used here: rustdoc has nothing to attach it to on a foreign module.
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    fn MessageBoxW(
+        hwnd: *mut core::ffi::c_void,
+        text: *const u16,
+        caption: *const u16,
+        utype: u32,
+    ) -> i32;
+}
+
+/// Report a failure that happens before there is a window to report it in.
+///
+/// A release build is `windows_subsystem = "windows"`, so it has no console: a
+/// panic there is entirely silent. The process vanishes and the user sees
+/// nothing happen at all — which is what an unopenable library produces, since
+/// the database is opened before the window is built. "Nothing happened" is the
+/// worst possible way to report a concrete, fixable problem, so say it in a
+/// dialog and then leave.
+fn fatal(message: &str) -> ! {
+    eprintln!("xitter-dl: {message}");
+
+    #[cfg(windows)]
+    unsafe {
+        let wide = |s: &str| -> Vec<u16> {
+            s.encode_utf16().chain(std::iter::once(0)).collect()
+        };
+        const MB_ICONERROR: u32 = 0x0000_0010;
+        let text = wide(message);
+        let caption = wide("xitter-dl");
+        let _ = MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_ICONERROR,
+        );
+    }
+
+    std::process::exit(1);
+}
+
 /// Build and run the app.
 pub fn run() {
     let db_path = xdl_core::default_library_path();
-    let state = AppState::open(db_path)
-        .expect("could not open the library database");
+    let state = match AppState::open(db_path) {
+        Ok(state) => state,
+        Err(e) => fatal(&format!(
+            "xitter-dl could not open its library.\n\n\
+             {e}\n\n\
+             Set XITTER_DL_DB to keep the library somewhere else, e.g.\n\
+             C:\\Users\\you\\xitter-dl.sqlite"
+        )),
+    };
 
     tauri::Builder::default()
         .manage(state)

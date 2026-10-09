@@ -110,8 +110,19 @@ fn run() -> Result<()> {
     // Opening creates and migrates. That means `xdl stats` on a fresh machine
     // makes an empty library rather than erroring, which is the friendlier
     // behaviour for a first run.
-    let mut lib = db::Library::open(&path)
-        .with_context(|| format!("opening database at {}", path.display()))?;
+    // Formatted rather than `with_context` on purpose. `{:#}` walks the whole
+    // chain, and `Error`'s own Display already carries its source, so a context
+    // wrapper prints "Access is denied" twice and wedges the hint into the
+    // middle of the chain. One anyhow error, hint last, is what a stuck user
+    // needs to read.
+    let mut lib = db::Library::open(&path).map_err(|e| {
+        anyhow::anyhow!(
+            "opening database at {}\n  {e}\n\n  \
+             hint: this location can be moved with XITTER_DL_DB, e.g.\n    \
+             $env:XITTER_DL_DB = 'C:\\Users\\you\\xitter-dl.sqlite'",
+            path.display()
+        )
+    })?;
 
     match command.as_str() {
         "import" => cmd_import(&mut lib, rest, json),

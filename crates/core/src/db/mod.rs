@@ -27,7 +27,7 @@ impl Library {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| crate::error::Error::io(parent, e))?;
+                std::fs::create_dir_all(parent).map_err(|e| crate::error::Error::create_dir(parent, e))?;
             }
         }
 

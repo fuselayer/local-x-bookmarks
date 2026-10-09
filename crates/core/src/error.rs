@@ -19,6 +19,18 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// Kept separate from [`Error::Io`] because "could not read" is actively
+    /// wrong for a failure to *create* a directory, and the wrong verb sends
+    /// the reader hunting for a permissions problem on a file that does not
+    /// exist yet. A failure to create the library's parent reported itself as
+    /// "could not read <dir>" for exactly this reason, and cost real time.
+    #[error("could not create {path}: {source}")]
+    CreateDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("malformed JSON: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -42,6 +54,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl Error {
     pub fn io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
         Error::Io { path: path.into(), source }
+    }
+
+    pub fn create_dir(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        Error::CreateDir { path: path.into(), source }
     }
 
     pub fn invalid(msg: impl Into<String>) -> Self {
