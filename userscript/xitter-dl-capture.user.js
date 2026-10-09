@@ -10,6 +10,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
@@ -848,16 +849,81 @@
 
   // ── start ──────────────────────────────────────────────────────────────────
 
-  function boot() {
+  /**
+   * Tampermonkey's own menu — reachable from the toolbar icon, so it still
+   * works when the page is too broken to show the pill. That is the whole
+   * point: the hooks are the one thing here that can take x.com down, and
+   * turning them off must not require editing a file and finding a way back.
+   */
+  function menus() {
+    if (typeof GM_registerMenuCommand !== 'function') return;
+    const label = (on) => (on ? 'ON — click to turn OFF' : 'OFF — click to turn ON');
     try {
-      if (CFG.hookNetwork) {
+      GM_registerMenuCommand(
+        'xitter-dl network hooks: ' + label(store.get('hookNetwork', CFG.hookNetwork)) + ' (reload after)',
+        function () {
+          store.set('hookNetwork', !store.get('hookNetwork', CFG.hookNetwork));
+          try {
+            alert('xitter-dl: reload the page for this to take effect.');
+          } catch (_) {}
+        }
+      );
+      GM_registerMenuCommand(
+        'xitter-dl debug logging: ' + label(!!store.get('debug', false)) + ' (reload after)',
+        function () {
+          store.set('debug', !store.get('debug', false));
+          try {
+            alert('xitter-dl: reload the page for this to take effect.');
+          } catch (_) {}
+        }
+      );
+    } catch (_) {}
+  }
+
+  function boot() {
+    // Debug logging is a stored preference so it can be flipped from the
+    // Tampermonkey menu, including when the page will not load.
+    log.on = !!store.get('debug', false);
+
+    try {
+      // Hooking is decided at runtime, not just from CFG, for two reasons.
+      //
+      // 1. On Firefox the hooks are only safe when `exportFunction` exists to
+      //    carry them across compartments. Without it, patching `fetch` stops
+      //    x.com loading entirely — every request the page makes goes through
+      //    the wrapper. Refusing to hook is strictly better than taking the
+      //    site down, so the check is a gate, not a warning.
+      // 2. The stored flag lets the Tampermonkey menu turn the hooks off
+      //    without editing this file, which matters precisely when the page is
+      //    too broken to reach the pill.
+      const isFirefox = /firefox|fxios/i.test(W.navigator && W.navigator.userAgent);
+      const canExport = typeof exportFunction === 'function';
+      const wanted = store.get('hookNetwork', CFG.hookNetwork);
+      const allowed = ! (isFirefox && ! canExport);
+
+      if (wanted && allowed) {
         hookFetch();
         hookXhr();
+        log.info('hooks installed');
+      } else if (!allowed) {
+        setStatus('error', {
+          error: 'firefox: cannot patch fetch safely',
+        });
+        loudly(
+          'not hooking fetch',
+          'Firefox without `exportFunction`: assigning a sandbox function to ' +
+            'window.fetch is what stops x.com loading. Capture is off; the page is fine.'
+        );
+      } else {
+        log.info('hooks off by choice');
       }
-      log.info('hooks installed');
 
-      // Reflect stored state before anything is captured.
-      if (store.get('secret', null)) {
+      // Reflect stored state before anything is captured. The "cannot hook"
+      // case keeps the error status set above rather than overwriting it: the
+      // reason capture is off matters more than the pairing state.
+      if (!allowed) {
+        // status already set
+      } else if (store.get('secret', null)) {
         setStatus('app-not-running');
       } else {
         setStatus('needs-pairing');
@@ -903,6 +969,8 @@
       setInterval(() => {
         if (queue.size() > 0) flush();
       }, 20000);
+
+      menus();
     } catch (e) {
       loudly('boot failed', e);
     }
