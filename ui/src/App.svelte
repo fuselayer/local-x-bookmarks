@@ -1,8 +1,10 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { LibraryStats, PostView, SearchHit } from './lib/types';
   import Tweet from './lib/Tweet.svelte';
   import Icon from './lib/Icon.svelte';
   import Snippet from './lib/Snippet.svelte';
+  import Pairing from './lib/Pairing.svelte';
   import * as api from './lib/api';
   import {
     applyTheme,
@@ -29,6 +31,10 @@
   let importText = $state('');
   let importBusy = $state(false);
   let importNote = $state<string | null>(null);
+
+  // Connect-a-browser panel. Mounted only while open, because mounting is what
+  // starts the pairing code and unmounting is what invalidates it.
+  let showPairing = $state(false);
 
   const list = $derived(hits ? hits.map((h) => h.post) : posts);
   const selected = $derived(list.find((p) => p.id === selectedId) ?? list[0] ?? null);
@@ -72,6 +78,30 @@
 
   $effect(() => {
     void refresh();
+  });
+
+  // Live capture. Without this the list would be stale exactly when it matters
+  // most: you scroll x.com, the receiver files twenty bookmarks, and the window
+  // you are looking at shows none of them.
+  onMount(() => {
+    let off: (() => void) | undefined;
+    let alive = true;
+    void api
+      .onBridgeEvent((event) => {
+        if (!alive) return;
+        if (event.type === 'captured' && event.new > 0) void refresh();
+      })
+      .then((f) => {
+        if (alive) off = f;
+        else f();
+      })
+      .catch(() => {
+        // Not running in the shell; nothing to subscribe to.
+      });
+    return () => {
+      alive = false;
+      off?.();
+    };
   });
 
   // Debounce: search runs on every keystroke in Rust, but there is no reason
@@ -123,7 +153,8 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
-      if (showImport) showImport = false;
+      if (showPairing) showPairing = false;
+      else if (showImport) showImport = false;
       else if (query) query = '';
     }
     // "/" focuses search, exactly as it does on X.
@@ -170,9 +201,16 @@
           <option value={t.value}>{t.label}</option>
         {/each}
       </select>
-      <button class="primary" onclick={() => (showImport = !showImport)}>Import</button>
+      <button class="primary" onclick={() => (showPairing = !showPairing)}>
+        Connect browser
+      </button>
+      <button onclick={() => (showImport = !showImport)}>Import</button>
     </div>
   </header>
+
+  {#if showPairing}
+    <Pairing onclose={() => (showPairing = false)} />
+  {/if}
 
   {#if showImport}
     <section class="import hairline">

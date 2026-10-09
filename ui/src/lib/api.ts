@@ -14,6 +14,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import type { ImportResult, LibraryStats, PostView, SearchHit } from './types';
 
 /** True when running inside the Tauri shell rather than a plain browser. */
@@ -71,4 +72,83 @@ export async function openExternal(url: string): Promise<void> {
 /** The canonical permalink for a post. Pure string building — no request. */
 export function tweetUrl(handle: string, id: string): string {
   return `https://x.com/${handle}/status/${id}`;
+}
+
+// ── pairing ──────────────────────────────────────────────────────────────────
+
+/**
+ * The pairing state, as far as the backend will describe it.
+ *
+ * Note what is missing: the secret. It is minted for the userscript and handed
+ * over exactly once, in the response to that script's `/v1/pair` exchange. It
+ * never crosses the IPC boundary, so the webview cannot leak what it never
+ * receives (PRD §7.4).
+ */
+export interface PairingInfo {
+  port: number;
+  /** Ready to show the user, e.g. `http://127.0.0.1:8737`. */
+  address: string;
+  /** The raw code, for a copy button. Present only while the panel is open. */
+  code: string | null;
+  /** The same code as the user should read it: `ABCD-2345`. */
+  formattedCode: string | null;
+  secondsRemaining: number;
+  paired: boolean;
+  pairedLabel: string | null;
+  pairedAt: number | null;
+}
+
+/** What one ingested batch did. Mirrors `bridge::CaptureReport` in Rust. */
+export interface CaptureReport {
+  seen: number;
+  new: number;
+  updated: number;
+  problems: string[];
+}
+
+/** Mirrors `bridge::BridgeEvent`. Internally tagged on `type`. */
+export type BridgeEvent =
+  | { type: 'paired'; label: string | null; at: number }
+  | ({ type: 'captured' } & CaptureReport)
+  | { type: 'rejected'; reason: string; at: number };
+
+export async function pairingStatus(): Promise<PairingInfo> {
+  return invoke<PairingInfo>('pairing_status');
+}
+
+/**
+ * Begin displaying a code, rotating it if the current one has expired.
+ *
+ * Called when the panel opens. The code is display state and is deliberately
+ * never persisted, so it cannot outlive the window that showed it.
+ */
+export async function pairingShow(): Promise<PairingInfo> {
+  return invoke<PairingInfo>('pairing_show');
+}
+
+/** Stop displaying a code, invalidating it. Called when the panel closes. */
+export async function pairingHide(): Promise<PairingInfo> {
+  return invoke<PairingInfo>('pairing_hide');
+}
+
+/**
+ * Forget every pairing and mint a new secret.
+ *
+ * Every installed script stops working until it is paired again. That is the
+ * point: it is the answer to "I think someone else has my secret".
+ */
+export async function pairingRevoke(): Promise<PairingInfo> {
+  return invoke<PairingInfo>('pairing_revoke');
+}
+
+/**
+ * Subscribe to live capture progress. Resolves to an unsubscribe function.
+ *
+ * Rejects outside the Tauri shell rather than pretending to work, so a caller
+ * that ignores the promise fails loudly in a plain browser.
+ */
+export async function onBridgeEvent(
+  handler: (event: BridgeEvent) => void
+): Promise<() => void> {
+  return listen<BridgeEvent>('xdl://bridge', (event) => handler(event.payload));
 }

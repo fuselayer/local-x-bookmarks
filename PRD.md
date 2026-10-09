@@ -442,6 +442,16 @@ But an earlier draft of this section claimed the in-session userscript fetch was
 
 **Either way, storage is content-addressed** as `media/<sha256>.<ext>` so re-syncs never re-download, and files are served to the webview through Tauri's `asset:` protocol — so the *webview* makes no network calls regardless of which path produced the bytes.
 
+**A size ceiling, because a video is not a thumbnail.** A bookmark feed contains multi-hundred-megabyte videos, and a nightly re-sync that quietly pulls those down is both a bandwidth problem and a disk problem the user never agreed to. So size is a first-class policy, not an implementation detail:
+
+- **Default ceiling: 5 MB per item.** Anything larger is *recorded but not fetched*. The row keeps its dimensions, alt text, duration and the URL, so the library is complete as a catalogue even where it is empty as a cache.
+- **Not-downloaded is a visible state, never a broken image.** The UI renders a placeholder that names the reason — `video · 412 MB · not downloaded` — with the size known *before* the decision, from the variant's `bitrate`/size metadata or a `HEAD` where that is all that is available. A gap the user can see and explain is worth more than a silent hole.
+- **Per-item fetch.** Every not-downloaded item carries its own "Download this one" action. One item, one deliberate click, no budget shared with anything else.
+- **A toggle for the impatient: "Automatically download large media."** Off by default. When on, the ceiling rises to a configurable hard cap (default 2 GB) and the same politeness rules apply. When off, nothing above the ceiling is ever fetched implicitly — including during "Archive originals", which honours the same ceiling unless the user says otherwise.
+- **The ceiling is a guard, not a wall.** A user who wants one 400 MB video can always have it; they just have to say so. The rule is that *implicit* fetching never crosses the line, and explicit fetching always can.
+
+Politeness interacts with this: the ceiling is checked **before** any request, so a skipped item costs zero bytes and never touches the budget or the circuit breaker.
+
 ### 7.6 Data model
 
 ```sql
@@ -773,7 +783,7 @@ An earlier draft carried gyotaku's ~120 ms summon and 37 MB idle straight across
 | **M0 — Spike (1 wk)** | Userscript: `fetch`/XHR hook, operation matcher, `Bookmarks` parser, `GM_xmlhttpRequest` handoff with persisted pairing, NDJSON exporter, count badge. Run it on a real >1k-bookmark account. Also: baseline cold launch and idle RSS on WebView2 / WKWebView / WebKitGTK. | **Go/no-go data on the four real unknowns:** where pagination cursors die; whether default in-session media capture covers the media the UI needs; whether `@run-at document-start` reliably beats X's bundle across managers and browsers; and the webview performance baselines that set §11's unset targets. *Nothing else is worth building before this answers itself.* |
 | **M1 — Core (2 wk)** | `crates/core`: schema, NDJSON importer, external-content FTS5 (both tokenizers + triggers), RRF fusion, search, dedupe, `capture_payloads` / `raw_tweet` storage. `crates/cli`: `xdl import … && xdl search …` | A working local library, dogfooded from the terminal. Immediately useful to anyone with an existing export. |
 | **M2 — App (2 wk)** | Tauri shell, pairing + persistent secret flow, loopback receiver, live capture panel, virtualized list/detail, command palette, keyboard nav, "Open on X" | The split-screen demo runs. **This is the shippable v1.** |
-| **M3 — Polish (2 wk)** | Media pipeline (default cache-hit capture + content-addressed store), optional "Archive originals" action, tags, notes, folder joins, filters, Markdown/JSON/CSV export, theming, disappearance badges | Feel and finish. |
+| **M3 — Polish (2 wk)** | Media pipeline (default cache-hit capture + content-addressed store + the 5 MB default ceiling and its per-item fetch action), optional "Archive originals" action, tags, notes, folder joins, filters, Markdown/JSON/CSV export, theming, disappearance badges | Feel and finish. |
 | **M4 — Semantic (1 wk)** | `fastembed-rs` + `sqlite-vec` + RRF across all three retrievers, background indexer with progress, `/sem` prefix | The differentiator, and the only source of typo tolerance: "a library you can actually search, not a dead CSV." |
 | **M5 — Careful Mode + importers (1 wk)** | Assisted scroll with the full mitigation suite, cooldown ledger, pre-flight risk warnings; `twitter-web-exporter` / `xarchive` / HAR / CSV importers | Comfort features for large libraries. |
 | **M6 — Ship** | Signed builds (macOS notarized, Windows signed), updater, GitHub releases, Greasy Fork userscript publish, launch tweet with a 10-second search demo | Done. |
