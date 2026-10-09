@@ -96,6 +96,17 @@ fn run() -> Result<()> {
     let rest = &positional[1..];
 
     let path = db_path.unwrap_or_else(xdl_core::default_library_path);
+
+    // `paths` answers "where is my library?", which is the question you ask when
+    // something is already wrong. It therefore must not depend on the library
+    // opening: a database that cannot be opened is precisely when knowing its
+    // location matters most. Handled before `Library::open`, not inside the
+    // match below, for that reason.
+    if command == "paths" {
+        println!("{}", path.display());
+        return Ok(());
+    }
+
     // Opening creates and migrates. That means `xdl stats` on a fresh machine
     // makes an empty library rather than erroring, which is the friendlier
     // behaviour for a first run.
@@ -108,10 +119,6 @@ fn run() -> Result<()> {
         "show" => cmd_show(&lib, rest, json),
         "stats" => cmd_stats(&lib, json),
         "bridge" => cmd_bridge(&path, rest),
-        "paths" => {
-            println!("{}", path.display());
-            Ok(())
-        }
         other => bail!("unknown command `{other}`\n\n{USAGE}"),
     }
 }
