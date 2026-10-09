@@ -309,7 +309,10 @@ test('no hooks are installed anywhere except the bookmarks route', () => {
   // bookmarks timeline was fine. The hooks can only be useful on the timeline,
   // so on every other route the correct number of page objects to patch is
   // zero.
-  for (const path of ['/', '/home', '/Empty_America/status/2108336792508473546', '/i/history']) {
+  // Synthetic paths only. A real status URL was used here while diagnosing a
+  // report, which put somebody else's handle and a real tweet id into a file
+  // destined for a public repository.
+  for (const path of ['/', '/home', '/someone/status/1234567890123456789', '/i/history']) {
     const { win, originals } = boot({ path });
     assert.equal(win.fetch, originals.fetch, `fetch must be untouched on ${path}`);
     assert.equal(
