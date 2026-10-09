@@ -8,6 +8,11 @@
 /.pnpm-store
 /.scratch
 
+# Working documents, not part of the source. Kept on disk, never published:
+# they are notes and a design transcript, and they go stale faster than code.
+/PRD.md
+/initial chat.md
+
 # Node
 node_modules
 /ui/dist
