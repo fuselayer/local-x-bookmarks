@@ -5,10 +5,6 @@ that rides along in **your own browser**, stored in a single SQLite file,
 searchable offline in milliseconds. No API, no cloud, no account, no recurring
 cost.
 
-> **The design contract is in [`PRD.md`](PRD.md).** This file covers how to
-> build and run it, and — more usefully — everywhere the implementation
-> deliberately departs from that document, with reasons.
-
 ---
 
 ## Status
