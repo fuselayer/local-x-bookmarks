@@ -79,9 +79,39 @@
     dedupeMemory: 200,
 
     uiAnchorId: 'xdl-capture-pill',
+
+    // Set this to false to load the script without patching anything the page
+    // owns. It exists because "x.com will not load" has two candidate causes
+    // that look identical from the outside — the pill UI, and the network
+    // hooks — and this separates them in one reload. With it false you should
+    // still see the pill; if x.com loads here and not with it true, the hooks
+    // are the problem and the UI is exonerated.
+    hookNetwork: true,
   };
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+  /**
+   * Hand a function to page code in a form page code can call.
+   *
+   * A userscript with any `@grant` runs in its own compartment. Assigning a
+   * function from that compartment onto `window.fetch` works in Chrome, but on
+   * Firefox the page's Xray vision sees a foreign function and rejects the
+   * call — which takes x.com down with it, because every request it makes goes
+   * through the wrapper we installed.
+   *
+   * `exportFunction` is Firefox's supported way to clone a function into the
+   * target compartment. Chrome has no equivalent and needs none, so this is a
+   * no-op there. Failing to export is not fatal: it degrades to the previous
+   * behaviour rather than refusing to start.
+   */
+  function intoPage(fn) {
+    try {
+      return typeof exportFunction === 'function' ? exportFunction(fn, W) : fn;
+    } catch (_) {
+      return fn;
+    }
+  }
 
   // ── storage (GM_* with a graceful fallback) ────────────────────────────────
   //
@@ -121,6 +151,26 @@
       if (this.on) console.warn('[xitter-dl]', ...a);
     },
   };
+
+  /**
+   * Report something that means the script is not working, whether or not
+   * logging is on. Deduplicated by key, because the pill attaches from a poll
+   * and a repeating failure would otherwise flood the console.
+   *
+   * The gated `log` above is right for capture chatter and wrong for this: a
+   * boot failure that only prints when you already suspect a boot failure is
+   * not a diagnostic, it is a secret.
+   */
+  const loudly = (() => {
+    const seen = new Set();
+    return function (key, ...rest) {
+      if (seen.has(key)) return;
+      seen.add(key);
+      try {
+        console.error('[xitter-dl]', key, ...rest);
+      } catch (_) {}
+    };
+  })();
 
   // ── the capture queue ──────────────────────────────────────────────────────
   //
@@ -336,7 +386,9 @@
       const original = W.fetch;
       if (typeof original !== 'function') return;
 
-      W.fetch = function (input, init) {
+      // `intoPage` matters more here than anywhere else: if the page cannot
+      // call this, x.com cannot make a single request.
+      W.fetch = intoPage(function (input, init) {
         const promise = original.apply(this, arguments);
         try {
           const url = urlOf(input);
@@ -360,7 +412,7 @@
           }
         } catch (_) {}
         return promise;
-      };
+      });
     } catch (e) {
       log.warn('could not hook fetch', e);
     }
@@ -374,14 +426,14 @@
       const originalOpen = proto.open;
       const originalSend = proto.send;
 
-      proto.open = function (method, url) {
+      proto.open = intoPage(function (method, url) {
         try {
           this.__xdlUrl = url;
         } catch (_) {}
         return originalOpen.apply(this, arguments);
-      };
+      });
 
-      proto.send = function () {
+      proto.send = intoPage(function () {
         try {
           const self = this;
           self.addEventListener('load', function () {
@@ -398,7 +450,7 @@
           });
         } catch (_) {}
         return originalSend.apply(this, arguments);
-      };
+      });
     } catch (e) {
       log.warn('could not hook XMLHttpRequest', e);
     }
@@ -606,9 +658,17 @@
     render();
   }
 
+  // Body specifically, never `documentElement`.
+  //
+  // At `@run-at document-start` the parser has not created `<body>` yet, and
+  // falling back to `documentElement` meant the pill got appended directly to
+  // `<html>` — outside the body box, in a position the HTML parser never
+  // produces and X's own bundle has no reason to preserve. Waiting for `body`
+  // costs nothing and puts the pill where every other element on the page
+  // lives.
   function host() {
     try {
-      return W.document && (W.document.body || W.document.documentElement);
+      return (W.document && W.document.body) || null;
     } catch (_) {
       return null;
     }
@@ -690,7 +750,7 @@
       render();
       return true;
     } catch (e) {
-      log.warn('could not build the pill', e);
+      loudly('could not build the pill', e);
       return false;
     }
   }
@@ -790,8 +850,10 @@
 
   function boot() {
     try {
-      hookFetch();
-      hookXhr();
+      if (CFG.hookNetwork) {
+        hookFetch();
+        hookXhr();
+      }
       log.info('hooks installed');
 
       // Reflect stored state before anything is captured.
@@ -801,20 +863,36 @@
         setStatus('needs-pairing');
       }
 
-      // The pill needs a DOM. `document-start` runs before there is one, so
-      // this waits for it, and re-attaches if X's SPA navigation removes it.
-      const attach = () => {
-        if (ensureUi()) return true;
-        return false;
-      };
+      // The pill needs a DOM, and `document-start` runs before there is one.
+      // Two things can be missing and both are normal: `<body>` (always, at
+      // document-start) and `documentElement` itself (sometimes, when the
+      // parser has not created anything yet). So observe when there is
+      // something to observe, poll for when there is not, and stop on the
+      // first success.
+      const attach = () => ensureUi();
       if (!attach()) {
-        const obs = new MutationObserver(() => {
-          if (attach()) obs.disconnect();
-        });
-        try {
-          obs.observe(W.document.documentElement, { childList: true, subtree: true });
-        } catch (_) {}
-        W.document.addEventListener('DOMContentLoaded', attach, { once: true });
+        let obs = null;
+        let timer = null;
+        const stop = () => {
+          try {
+            if (obs) obs.disconnect();
+          } catch (_) {}
+          if (timer !== null) clearInterval(timer);
+        };
+        const tryAttach = () => {
+          if (attach()) stop();
+        };
+
+        if (W.document.documentElement) {
+          obs = new MutationObserver(tryAttach);
+          try {
+            obs.observe(W.document.documentElement, { childList: true, subtree: true });
+          } catch (_) {
+            obs = null;
+          }
+        }
+        W.document.addEventListener('DOMContentLoaded', tryAttach, { once: true });
+        timer = setInterval(tryAttach, 250);
       }
 
       // Anything left over from a previous session goes now, if the app is up.
@@ -826,7 +904,7 @@
         if (queue.size() > 0) flush();
       }, 20000);
     } catch (e) {
-      log.warn('boot failed', e);
+      loudly('boot failed', e);
     }
   }
 
