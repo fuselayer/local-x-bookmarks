@@ -89,14 +89,23 @@
     // are the problem and the UI is exonerated.
     hookNetwork: true,
 
-    // Routes where the network hooks are allowed to exist at all.
+    // Routes this script does any work on. Everywhere else it does nothing to
+    // the page: no DOM, no observers, no hooks, and not one write to storage.
+    // What still runs is the Tampermonkey menu registration and a poll that
+    // reads `location.pathname`; neither touches the page.
     //
-    // Reported symptom: x.com failed to load on a status page while the
-    // bookmarks timeline was fine. The hooks can only ever be useful on the
-    // timeline; everywhere else they are risk with no benefit, so the fix is
-    // for them to not be there. X is a single-page app, so this is evaluated
-    // on navigation, not only at load — see `syncRouteHook`.
-    bookmarkRoutes: ['/i/bookmarks'],
+    // Reported symptom: x.com failed to load on any route that was not the
+    // bookmarks timeline. The hooks were already gated to the timeline, but the
+    // *rest* of the script was not — it read storage and installed a
+    // document-wide observer on every route, and a boot failure left that
+    // observer running for the life of the tab. Gating the whole script, not
+    // just the hooks, is what makes every other route as if it were not
+    // installed.
+    //
+    // This is also the seam for capturing a bookmark at the moment it is made,
+    // which happens on any route and will widen this list rather than remove it.
+    // The route watch below is where that plugs in.
+    activeRoutes: ['/i/bookmarks'],
   };
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
@@ -128,19 +137,52 @@
   // Wrapped because some managers expose GM_getValue as sync and some as a
   // promise, and because a manager that has them disabled should degrade to
   // "captures nothing, breaks nothing" rather than throwing.
-
+  //
+  // Every value that crosses this boundary is a primitive, and both halves of
+  // that rule are load-bearing.
+  //
+  // Handing the manager an array or an object is what produced
+  // `Permission denied to access property "clonable"` on Firefox: the manager
+  // reaches into the value from its own compartment, the Xray wrapper refuses,
+  // and the call throws. A primitive cannot be refused. So anything structured
+  // is serialised here first and the boundary only ever sees a string.
+  //
+  // The same applies to the *default* argument, which is why `getJSON` does not
+  // take one in structured form.
   const store = {
     get(key, fallback) {
       try {
         const v = GM_getValue(key, fallback);
-        return v === undefined ? fallback : v;
+        return v === undefined || v === null ? fallback : v;
       } catch (_) {
         return fallback;
       }
     },
     set(key, value) {
+      // Not a silent coercion for its own sake: it is the difference between a
+      // stored list and a thrown exception, and `set` is called from the hot
+      // path where an exception would cost a capture.
+      if (value !== null && typeof value === 'object') return store.setJSON(key, value);
       try {
         GM_setValue(key, value);
+      } catch (_) {
+        /* not fatal: this session just will not survive a reload */
+      }
+    },
+    getJSON(key, fallback) {
+      try {
+        const raw = GM_getValue(key, null);
+        if (typeof raw !== 'string' || raw === '') return fallback;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(fallback) && !Array.isArray(parsed)) return fallback;
+        return parsed;
+      } catch (_) {
+        return fallback;
+      }
+    },
+    setJSON(key, value) {
+      try {
+        GM_setValue(key, JSON.stringify(value));
       } catch (_) {
         /* not fatal: this session just will not survive a reload */
       }
@@ -189,41 +231,58 @@
   // appended to and shipped without a re-encode.
 
   const queue = {
-    lines: store.get('queue', []),
-    seen: new Set(store.get('recentHashes', [])),
-    seenOrder: store.get('recentHashes', []),
+    // Built on first use rather than while the file is being evaluated, so that
+    // a route this script does not work on never reads storage at all. This is
+    // what makes the route gate in `watchRoute` a real one rather than a
+    // promise about the parts that happen to be lazy already.
+    lines: null,
+    seen: null,
+    seenOrder: null,
+
+    ensure() {
+      if (this.lines) return;
+      const recent = store.getJSON('recentHashes', []);
+      this.lines = store.getJSON('queue', []);
+      this.seenOrder = recent;
+      this.seen = new Set(recent);
+    },
 
     push(line) {
+      this.ensure();
       this.lines.push(line);
       // Bound the persisted queue. A user who scrolls 5000 bookmarks with the
       // app closed should not build a 200 MB GM value; the cap is generous and
       // the overflow is surfaced rather than silently dropped.
       if (this.lines.length > 4000) this.lines.splice(0, this.lines.length - 4000);
-      store.set('queue', this.lines);
+      store.setJSON('queue', this.lines);
     },
 
     take(n) {
+      this.ensure();
       return this.lines.slice(0, n);
     },
 
     drop(n) {
+      this.ensure();
       this.lines.splice(0, n);
-      store.set('queue', this.lines);
+      store.setJSON('queue', this.lines);
     },
 
     size() {
+      this.ensure();
       return this.lines.length;
     },
 
     /** True the first time this body is seen; false for a repeat. */
     firstSight(hash) {
+      this.ensure();
       if (this.seen.has(hash)) return false;
       this.seen.add(hash);
       this.seenOrder.push(hash);
       while (this.seenOrder.length > CFG.dedupeMemory) {
         this.seen.delete(this.seenOrder.shift());
       }
-      store.set('recentHashes', this.seenOrder);
+      store.setJSON('recentHashes', this.seenOrder);
       return true;
     },
   };
@@ -466,7 +525,7 @@
     }
   }
 
-  // ── hook lifetime ──────────────────────────────────────────────────────────
+  // ── hook lifetime, and the route gate ──────────────────────────────────────
   //
   // The hooks exist only while the bookmarks timeline is on screen, and are
   // removed when it is not. Two reasons, and the second is the important one:
@@ -480,11 +539,12 @@
   let hooked = false;
   let savedOriginals = null;
 
-  function routeAllowsHooks() {
+  /** Is the current route one this script does any work on? */
+  function routeIsActive() {
     try {
       const p = W.location && W.location.pathname;
       if (typeof p !== 'string') return false;
-      return CFG.bookmarkRoutes.some((r) => p === r || p.startsWith(r + '/'));
+      return CFG.activeRoutes.some((r) => p === r || p.startsWith(r + '/'));
     } catch (_) {
       return false;
     }
@@ -527,26 +587,33 @@
   }
 
   /**
-   * Keep the hooks in step with the current route.
+   * Run something when the route becomes active, and something else when it
+   * stops being active.
    *
    * Polled rather than driven by `popstate`, because x.com's client-side
    * navigation does not reliably announce itself and a 500 ms lag is invisible
    * here: the timeline's first request happens after the route settles, so the
    * hooks are always installed before there is anything to catch.
+   *
+   * This poll is the *only* thing that runs on a route we do not work on, and
+   * it reads nothing but `location.pathname`. That restraint is the fix for
+   * "any page that is not the bookmarks page fails to load": a document-start
+   * script that touches storage and the DOM on every route is a script that can
+   * break every route, and this one did.
    */
-  function syncRouteHook() {
-    let path = null;
+  function watchRoute(onActive, onInactive) {
+    let active = null;
     const check = () => {
-      let p;
+      let now;
       try {
-        p = W.location.pathname;
+        now = routeIsActive();
       } catch (_) {
         return;
       }
-      if (p === path) return;
-      path = p;
-      if (routeAllowsHooks()) installHooks();
-      else removeHooks();
+      if (now === active) return;
+      active = now;
+      if (now) onActive();
+      else onInactive();
     };
     check();
     setInterval(check, 500);
@@ -991,7 +1058,19 @@
     } catch (_) {}
   }
 
-  function boot() {
+  let started = false;
+
+  /**
+   * Everything the script does, and none of it runs off an active route.
+   *
+   * Runs once. Leaving the route and coming back does not re-run it, because
+   * the intervals set up here are per-document, not per-route; re-running would
+   * stack a second flush timer and a second route poll on every visit.
+   */
+  function startCapture() {
+    if (started) return;
+    started = true;
+
     // Debug logging is a stored preference so it can be flipped from the
     // Tampermonkey menu, including when the page will not load.
     log.on = !!store.get('debug', false);
@@ -1013,10 +1092,7 @@
       const allowed = ! (isFirefox && ! canExport);
 
       if (wanted && allowed) {
-        // Scoped to the bookmarks route, and kept in step with navigation.
-        // `hookFetch()`/`hookXhr()` are the primitives; `syncRouteHook` decides
-        // whether they should be in place at all.
-        syncRouteHook();
+        installHooks();
       } else if (!allowed) {
         setStatus('error', {
           error: 'firefox: cannot patch fetch safely',
@@ -1041,37 +1117,7 @@
         setStatus('needs-pairing');
       }
 
-      // The pill needs a DOM, and `document-start` runs before there is one.
-      // Two things can be missing and both are normal: `<body>` (always, at
-      // document-start) and `documentElement` itself (sometimes, when the
-      // parser has not created anything yet). So observe when there is
-      // something to observe, poll for when there is not, and stop on the
-      // first success.
-      const attach = () => ensureUi();
-      if (!attach()) {
-        let obs = null;
-        let timer = null;
-        const stop = () => {
-          try {
-            if (obs) obs.disconnect();
-          } catch (_) {}
-          if (timer !== null) clearInterval(timer);
-        };
-        const tryAttach = () => {
-          if (attach()) stop();
-        };
-
-        if (W.document.documentElement) {
-          obs = new MutationObserver(tryAttach);
-          try {
-            obs.observe(W.document.documentElement, { childList: true, subtree: true });
-          } catch (_) {
-            obs = null;
-          }
-        }
-        W.document.addEventListener('DOMContentLoaded', tryAttach, { once: true });
-        timer = setInterval(tryAttach, 250);
-      }
+      attachUi();
 
       // Anything left over from a previous session goes now, if the app is up.
       if (queue.size() > 0) scheduleFlush();
@@ -1081,11 +1127,62 @@
       setInterval(() => {
         if (queue.size() > 0) flush();
       }, 20000);
-
-      menus();
     } catch (e) {
       loudly('boot failed', e);
     }
+  }
+
+  function stopCapture() {
+    removeHooks();
+  }
+
+  /**
+   * Put the pill on the page, once there is a page to put it on.
+   *
+   * `@run-at document-start` means `<body>` does not exist yet, which is
+   * normal and temporary. What is not normal is how the previous version
+   * waited: a `MutationObserver` over the whole document subtree with
+   * `subtree: true`, disconnected only once the pill had been built. A pill
+   * that could not be built therefore left a subtree observer running on x.com
+   * for the life of the tab, firing on every DOM change the site makes — which
+   * is what "the page will not load" looked like from the outside.
+   *
+   * So: bounded, and it always stops. No observer at all, because the only
+   * question is whether `<body>` exists yet and a short poll answers it.
+   */
+  function attachUi() {
+    if (ensureUi()) return;
+
+    let tries = 0;
+    const timer = setInterval(function () {
+      tries += 1;
+      if (ensureUi() || tries >= 40) clearInterval(timer);
+    }, 250);
+
+    const onReady = function () {
+      try {
+        W.document.removeEventListener('DOMContentLoaded', onReady);
+      } catch (_) {}
+      if (ensureUi()) clearInterval(timer);
+    };
+
+    // No options dictionary here, deliberately. Firefox reads `capture` off it
+    // in the *page's* compartment, and a dictionary built in this one is
+    // refused: `Permission denied to access property "capture"`. That threw out
+    // of `boot`, which is how a missing `<body>` turned into a boot failure.
+    try {
+      W.document.addEventListener('DOMContentLoaded', onReady);
+    } catch (_) {}
+  }
+
+  function boot() {
+    // Registered on every route on purpose. This is the control you reach for
+    // when a page will not load, so it must not depend on one having loaded.
+    menus();
+
+    // Everything else waits for a route this script actually works on. On any
+    // other x.com page the poll inside `watchRoute` is the only thing running.
+    watchRoute(startCapture, stopCapture);
   }
 
   boot();

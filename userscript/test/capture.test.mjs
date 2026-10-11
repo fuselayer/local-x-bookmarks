@@ -66,7 +66,7 @@ function makeWorld({ fetchImpl, xhrImpl } = {}) {
       },
     },
     // The hooks are scoped to the bookmarks timeline, so this world has to say
-    // it is on it. See `syncRouteHook` in the script, and the route tests in
+    // it is on it. See `watchRoute` in the script, and the route tests in
     // pill.test.mjs for the other half of that behaviour.
     location: { pathname: '/i/bookmarks' },
     MutationObserver: class {
@@ -138,7 +138,13 @@ function fakeResponse(body, { ok = true } = {}) {
 }
 
 function queued(values) {
-  return (values.get('queue') || []).map((l) => JSON.parse(l));
+  // The queue is persisted as a JSON string, not as an array. Handing the
+  // manager a structured value is what produced
+  // `Permission denied to access property "clonable"` on Firefox, so the
+  // stored form is a string and the decoding happens here.
+  const raw = values.get('queue');
+  if (typeof raw !== 'string' || raw === '') return [];
+  return JSON.parse(raw).map((l) => JSON.parse(l));
 }
 
 // ── the wire format ──────────────────────────────────────────────────────────
@@ -239,6 +245,33 @@ test('a repeated page is not sent twice', async () => {
   await settle();
 
   assert.equal(queued(world.values).length, 1);
+});
+
+test('nothing structured is ever handed to the manager', async () => {
+  // `Permission denied to access property "clonable"` on Firefox came from
+  // passing an array to GM storage: the manager reaches into the value from its
+  // own compartment, the Xray wrapper refuses, and the call throws — which took
+  // the whole boot down with it. So storage only ever sees a primitive, and the
+  // two lists this script persists are serialised first.
+  const world = makeWorld({ fetchImpl: async () => fakeResponse(PAGE) });
+
+  world.win.fetch(BOOKMARKS_URL('AAA111'));
+  await settle();
+
+  assert.equal(world.values.size, 2, 'this capture should have persisted two keys');
+  for (const [key, value] of world.values) {
+    const kind = value === null ? 'null' : typeof value;
+    assert.ok(
+      value === null || ['string', 'number', 'boolean'].includes(kind),
+      `${key} was stored as ${kind}; only primitives may cross this boundary`
+    );
+  }
+  assert.equal(typeof world.values.get('queue'), 'string', 'the queue must persist as a string');
+  assert.equal(
+    typeof world.values.get('recentHashes'),
+    'string',
+    'the dedupe memory must persist as a string'
+  );
 });
 
 test('a malformed body queues nothing and throws nothing', async () => {

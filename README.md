@@ -18,11 +18,11 @@ No API, no OAuth, no scraping service, no cloud, no account, no recurring cost.
 | `crates/cli` | `xdl import / search / show / stats / bridge` |
 | `crates/app` | Tauri v2 shell: window, IPC commands, receiver lifecycle |
 | `ui` | Svelte 5 frontend, three X themes, capture and pairing panel |
-| `userscript` | Capture script — 28 JS tests, run against a real account |
+| `userscript` | Capture script — 33 JS tests |
 | Continuous capture | Not implemented |
 | Media | Not implemented — see [Media](#media-is-not-implemented) |
 
-Rust: `165` tests. JavaScript: `28`.
+Rust: `165` tests. JavaScript: `33`.
 
 ---
 
@@ -67,6 +67,35 @@ cd ui; pnpm tauri dev          # development, with hot reload
 or build the release binary as above. Only the release path applies the real
 CSP from `crates/app/tauri.conf.json`, so run it before trusting the CSP.
 
+### Where the library lives
+
+One SQLite file holds everything:
+
+| | |
+|---|---|
+| Default | `%APPDATA%\xitter-dl\library.sqlite` |
+| Override | `XITTER_DL_DB` |
+
+The app and the CLI both resolve it through `xdl_core::default_library_path`, so
+they cannot disagree about which file holds your bookmarks. `bridge.json` sits
+beside it, which is why pairing carries between the two.
+
+Keep two libraries, and never point the app at the wrong one:
+
+- **Yours** — the default path. Launch the app normally and this is what opens.
+  Real bookmarks, kept indefinitely; this is the file to back up.
+- **Throwaway** — `.scratch\library.sqlite`, reached by setting `XITTER_DL_DB`
+  for one command. Fixtures, import tests and smoke runs go here, so a
+  half-parsed payload never lands in the real thing.
+
+```powershell
+$env:XITTER_DL_DB = '.scratch\library.sqlite'   # this shell only
+cargo run -p xitter-dl-cli -- stats
+```
+
+`cargo test` cannot touch the real library: no test resolves the default path,
+and they work in `std::env::temp_dir()` instead.
+
 ---
 
 ## Capturing your bookmarks
@@ -89,12 +118,31 @@ that already work.
 
 Imported bookmarks appear in the app as they arrive.
 
-### The script only hooks the bookmarks timeline
+### The script does nothing except on the bookmarks timeline
 
-`fetch` and `XMLHttpRequest` are patched **only** on `/i/bookmarks`, and the
-originals are restored when you navigate away. Everywhere else on x.com the
-page is untouched. Patching the network layer is the one thing in the script
-that can stop a page loading, so it is scoped to the one route that needs it.
+The whole script is gated to `/i/bookmarks`, not just the hooks. On any other
+x.com route it appends nothing to the DOM, patches nothing, and writes nothing
+to storage. The only things still running are a poll that reads
+`location.pathname` and the Tampermonkey menu registration. Navigate back and it
+starts.
+
+Gating only the *hooks* was not enough. Boot still ran everywhere: it read
+storage, built the pill, and installed a `subtree: true` `MutationObserver` over
+the document that disconnected only once the pill had been built. A pill that
+could not be built left that observer firing on every DOM change for the life of
+the tab — which is what "any page that is not the bookmarks page fails to load"
+turned out to be.
+
+Two rules fall out of that, and both were learned from the console:
+
+- **Nothing structured is handed to the userscript manager.** Values crossing
+  that boundary are primitives; the queue and the dedupe memory are stored as
+  JSON strings. Passing an array produced
+  `Permission denied to access property "clonable"` on Firefox, which took the
+  whole boot down with it.
+- **No event-listener options object.** Firefox reads `capture` off that
+  dictionary in the *page's* compartment and refuses one built in the script's:
+  `Permission denied to access property "capture"`.
 
 On Firefox the hooks are installed only when `exportFunction` is available to
 carry them across compartments; without it the script declines to hook and says

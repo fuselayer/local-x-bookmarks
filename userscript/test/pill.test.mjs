@@ -107,10 +107,18 @@ const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 Chrome/130.0
  * @param {boolean} o.exported   Whether `exportFunction` exists, as on Firefox.
  * @param {object}  o.stored     GM storage, e.g. { hookNetwork: false }.
  */
-function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookmarks' } = {}) {
+function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookmarks', noBody = false } = {}) {
   const dom = makeDom();
+  if (noBody) dom.doc.body = null;
   const values = new Map(Object.entries(stored));
   const messages = [];
+  // Recorded so a test can prove the script installs none of them. See the
+  // regression guard at the bottom of this file.
+  const observers = [];
+  // Intervals are recorded rather than run: `boot` starts a 20 s flush timer and
+  // a 500 ms route poll, and neither should fire in a unit test. A test that
+  // wants one drives it by hand.
+  const intervals = [];
 
   // Kept as named references so a test can prove the script left them alone.
   const pageFetch = async () => ({ ok: true, clone: () => ({ text: async () => '{}' }) });
@@ -128,8 +136,17 @@ function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookm
     location: { pathname: path },
     document: dom.doc,
     MutationObserver: class {
-      observe() {}
-      disconnect() {}
+      constructor(cb) {
+        this.cb = cb;
+        observers.push(this);
+      }
+      observe(target, opts) {
+        this.target = target;
+        this.opts = opts;
+      }
+      disconnect() {
+        this.disconnected = true;
+      }
     },
     fetch: pageFetch,
     XMLHttpRequest: function () {},
@@ -163,14 +180,22 @@ function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookm
     },
     setTimeout,
     clearTimeout,
-    setInterval: () => 0,
-    clearInterval: () => {},
+    setInterval: (fn, ms) => {
+      intervals.push({ fn, ms, runs: 0, cleared: false });
+      return intervals.length;
+    },
+    clearInterval: (id) => {
+      const it = intervals[id - 1];
+      if (it) it.cleared = true;
+    },
     URL,
   });
 
   vm.runInContext(SCRIPT, ctx);
 
-  const anchor = dom.body.childNodes.find((n) => n.id === 'xdl-capture-pill');
+  const anchor = dom.body
+    ? dom.body.childNodes.find((n) => n.id === 'xdl-capture-pill')
+    : null;
   const byLevel = (l) => messages.filter(([level]) => level === l).map(([, m]) => m);
   const pillText = () =>
     findAll(anchor || dom.body, (n) => n.tagName === 'SPAN' && n.textContent)
@@ -184,6 +209,8 @@ function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookm
     pillText,
     targets,
     messages,
+    observers,
+    intervals,
     warnings: byLevel('warn'),
     errors: byLevel('error'),
     values,
@@ -333,4 +360,75 @@ test('the bookmarks route does get hooked', () => {
     const { win, originals } = boot({ path });
     assert.notEqual(win.fetch, originals.fetch, `fetch should be hooked on ${path}`);
   }
+});
+
+// ── what must NOT happen off the bookmarks route ─────────────────────────────
+
+test('off-route, the script builds no DOM and writes nothing', () => {
+  // The reported failure was "any page that is not the bookmarks page fails to
+  // load", and gating only the *hooks* did not fix it: the rest of boot still
+  // ran everywhere — it read storage, built the pill, and installed a
+  // document-wide observer that only disconnected once the pill had been
+  // built. A pill that could not be built left that observer running for the
+  // life of the tab.
+  for (const path of ['/', '/home', '/someone/status/1234567890123456789']) {
+    const { dom, values, warnings, errors } = boot({ path });
+
+    assert.equal(dom.body.childNodes.length, 0, `nothing may be appended to <body> on ${path}`);
+    assert.equal(values.size, 0, `nothing may be written to storage on ${path}`);
+
+    const why = [...warnings, ...errors].join(' | ');
+    assert.equal(why, '', `booting off-route must be silent, got: ${why}`);
+  }
+});
+
+test('nothing structured is ever handed to the manager, off-route included', () => {
+  // `Permission denied to access property "clonable"` came from passing an
+  // array to GM storage: the manager reaches into the value from its own
+  // compartment and the Xray wrapper refuses. Storage therefore only ever sees
+  // strings, numbers, booleans or null. The end-to-end version of this, with an
+  // actual capture behind it, lives in capture.test.mjs.
+  for (const path of ['/i/bookmarks', '/home']) {
+    const { values } = boot({ path });
+    for (const [key, value] of values) {
+      const kind = value === null ? 'null' : typeof value;
+      assert.ok(
+        value === null || ['string', 'number', 'boolean'].includes(kind),
+        `${key} was stored as ${kind} on ${path}; only primitives may cross this boundary`
+      );
+    }
+  }
+});
+
+test('no MutationObserver is installed, on any route', () => {
+  // This is the page-hang itself. Waiting for `<body>` used to mean a
+  // `subtree: true` observer over the document, disconnected only once the pill
+  // had been built — so a pill that could not be built left it firing on every
+  // DOM change x.com makes, for the life of the tab.
+  //
+  // The only question is whether `<body>` exists yet, and a short poll answers
+  // it. Nothing here needs an observer at all, and this test is what stops one
+  // coming back.
+  for (const path of ['/i/bookmarks', '/i/bookmarks/folder/1', '/home', '/']) {
+    const { observers } = boot({ path });
+    assert.equal(observers.length, 0, `a MutationObserver was installed on ${path}`);
+  }
+});
+
+test('waiting for <body> gives up instead of polling forever', () => {
+  // The bounded half of the same fix. With `<body>` never appearing, the retry
+  // has to stop on its own. Driven by hand through the recorded timers, because
+  // the real ones would make this test wait ten seconds to prove it.
+  const { intervals } = boot({ path: '/i/bookmarks', noBody: true });
+
+  const poll = intervals.find((i) => i.ms === 250);
+  assert.ok(poll, 'the script should poll for <body> while it is missing');
+
+  for (let i = 0; i < 200 && !poll.cleared; i++) {
+    poll.runs += 1;
+    poll.fn();
+  }
+
+  assert.ok(poll.cleared, 'the poll must stop on its own, not run for the life of the tab');
+  assert.ok(poll.runs <= 60, `the poll ran ${poll.runs} times; it is supposed to be bounded`);
 });
