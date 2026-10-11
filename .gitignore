@@ -10,8 +10,11 @@
 
 # Working documents, not part of the source. Kept on disk, never published:
 # they are notes and a design transcript, and they go stale faster than code.
+# PLAN-in-situ.md is untracked for the same reason: it describes work that is
+# not built, so it would be wrong in the repository before it is right.
 /PRD.md
 /initial chat.md
+/PLAN-in-situ.md
 
 # Node
 node_modules
