@@ -380,7 +380,7 @@ test('no hooks are installed anywhere except the bookmarks route', () => {
   // Synthetic paths only. A real status URL was used here while diagnosing a
   // report, which put somebody else's handle and a real tweet id into a file
   // destined for a public repository.
-  for (const path of ['/', '/home', '/someone/status/1234567890123456789', '/i/history']) {
+  for (const path of ['/', '/home', '/someone/status/1234567890123456789']) {
     const { win, originals } = boot({ path });
     assert.equal(win.fetch, originals.fetch, `fetch must be untouched on ${path}`);
     assert.equal(
@@ -397,7 +397,11 @@ test('no hooks are installed anywhere except the bookmarks route', () => {
 });
 
 test('the bookmarks route does get hooked', () => {
-  for (const path of ['/i/bookmarks', '/i/bookmarks/folder/123']) {
+  // `/i/history` is not the bookmarks URL, and it fetches the bookmarks
+  // timeline anyway: a session on it logged `/graphql/Bookmarks` with 120
+  // entries. Capture was disabled on the one page the user was reading, which
+  // is why it is here rather than in the off-route list above.
+  for (const path of ['/i/bookmarks', '/i/bookmarks/folder/123', '/i/history']) {
     const { win, originals } = boot({ path });
     assert.notEqual(win.fetch, originals.fetch, `fetch should be hooked on ${path}`);
   }

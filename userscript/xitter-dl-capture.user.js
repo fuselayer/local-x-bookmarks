@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xitter-dl capture
 // @namespace    https://github.com/example/xitter-dl
-// @version      0.3.1
+// @version      0.3.2
 // @description  Files away the bookmarks X already sent your browser. No API, no extra requests.
 // @author       xitter-dl
 // @match        https://x.com/*
@@ -55,7 +55,7 @@
   // ── configuration ──────────────────────────────────────────────────────────
 
   const CFG = {
-    scriptVersion: '0.3.1',
+    scriptVersion: '0.3.2',
     wireVersion: 1,
 
     // Matched on the operation NAME, never on the rotating doc_id hash. This
@@ -95,6 +95,14 @@
     // writes nothing to storage. What still runs is the Tampermonkey menu
     // registration, the pill, and a poll that reads `location.pathname`.
     //
+    // `activeRoutes` is a guess about X's routing, and a wrong guess fails
+    // silently: no hooks, no captures, no error. It has been wrong twice. The
+    // second time was `/i/history`, which is not the bookmarks URL and yet
+    // fetches the bookmarks timeline anyway — 120 entries of `/graphql/Bookmarks`
+    // — so capture was disabled on the only page the user was actually reading.
+    // The pill reports the path it read and its verdict, which is how that was
+    // found; trust it over this list when they disagree.
+    //
     // Reported symptom: x.com failed to load on any route that was not the
     // bookmarks timeline. The hooks were already gated to the timeline, but the
     // *rest* of the script was not — it read storage and installed a
@@ -109,7 +117,7 @@
     // This is also the seam for capturing a bookmark at the moment it is made,
     // which happens on any route and will widen this list rather than remove it.
     // The route watch below is where that plugs in.
-    activeRoutes: ['/i/bookmarks'],
+    activeRoutes: ['/i/bookmarks', '/i/history'],
   };
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;

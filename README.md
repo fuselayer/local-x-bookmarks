@@ -111,8 +111,8 @@ DOM.
    file: Tampermonkey reads `@updateURL` from the copy it already has, so a
    pasted script has no URL to poll and will never update itself. Installed from
    the URL, it keeps itself current whenever `@version` moves.
-3. Open `https://x.com/i/bookmarks`. Click the pill in the bottom-right corner
-   and type the code.
+3. Open `https://x.com/i/history` — X's bookmarks page. Click the pill in the
+   bottom-right corner and type the code.
 
 After that it works across restarts. You re-pair only if you revoke, reinstall
 the script, clear its storage, or want to add a second browser — the app's
@@ -125,10 +125,18 @@ Imported bookmarks appear in the app as they arrive.
 
 The pill is attached on every x.com route. It is where capture status and pairing
 state are visible, and a pill that exists on only one route cannot tell you why
-it is missing on another. Capture is gated to `/i/bookmarks`: on any other route
-the script patches nothing and writes nothing to storage. What still runs is the
-Tampermonkey menu registration, the pill, and a poll that reads
-`location.pathname`.
+it is missing on another. Capture is gated to X's bookmarks routes — `/i/history`,
+which is where X serves the bookmarks timeline now, and the older
+`/i/bookmarks`. On any other route the script patches nothing and writes nothing
+to storage. What still runs is the Tampermonkey menu registration, the pill, and
+a poll that reads `location.pathname`.
+
+That list is a guess about X's routing, and it has been wrong twice — the second
+time for weeks, because `/i/history` fetches `/graphql/Bookmarks` without being
+called bookmarks anywhere. A wrong list does not error; it silently captures
+nothing. The pill is the antidote: it reports the path it read and its verdict,
+so the disagreement is visible on screen instead of being inferred from an empty
+library.
 
 Gating the pill as well was an overcorrection, and it is what made the pill
 disappear. It widened the route check's blast radius from "the hooks" to "the
@@ -188,7 +196,7 @@ page is broken: network hooks on/off, and debug logging on/off.
 The app's **Import** button takes a pasted payload, and `xdl import` takes a
 file, a directory, NDJSON, or a HAR:
 
-1. Open `x.com/i/bookmarks`.
+1. Open `x.com/i/history`.
 2. DevTools → Network → filter `graphql` → find a `Bookmarks` request.
 3. Right-click → Copy → Copy response.
 4. Paste into the app's Import box.
