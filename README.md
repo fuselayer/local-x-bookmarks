@@ -18,11 +18,11 @@ No API, no OAuth, no scraping service, no cloud, no account, no recurring cost.
 | `crates/cli` | `xdl import / search / show / stats / bridge` |
 | `crates/app` | Tauri v2 shell: window, IPC commands, receiver lifecycle |
 | `ui` | Svelte 5 frontend, three X themes, capture and pairing panel |
-| `userscript` | Capture script — 34 JS tests |
+| `userscript` | Capture script — 36 JS tests |
 | Continuous capture | Not implemented |
 | Media | Not implemented — see [Media](#media-is-not-implemented) |
 
-Rust: `165` tests. JavaScript: `34`.
+Rust: `165` tests. JavaScript: `36`.
 
 ---
 
@@ -150,7 +150,7 @@ Hooks are armed on arrival at the timeline, removed on leaving it, and armed
 again on return. Arming used to be one-time while disarming was not, so capture
 died at the first navigation away and never came back.
 
-Three rules fall out of all that, and every one of them was learned from the
+Four rules fall out of all that, and every one of them was learned from the
 console:
 
 - **Nothing structured is handed to the userscript manager.** Values crossing
@@ -162,9 +162,19 @@ console:
   dictionary in the *page's* compartment and refuses one built in the script's:
   `Permission denied to access property "capture"`.
 - **A failure is announced.** The script prints `[xitter-dl] <version> loaded`
-  on every page, whether or not debug logging is on, and anything that stops it
-  working goes to `console.error` with the same prefix. Silence from a capture
-  script is otherwise indistinguishable from a capture script that is working.
+  and every route change through `console.log`, whether or not debug logging is
+  on, and anything that stops it working goes to `console.error` with the same
+  prefix. Silence from a capture script is otherwise indistinguishable from a
+  capture script that is working.
+- **`console.log`, never `console.info`.** Firefox files `info` behind its own
+  filter chip, so a beacon sent there is invisible to anyone with the console
+  filtered to "Logs" — which is everyone. It was invisible here for two rounds
+  of debugging.
+
+The pill's panel repeats the last of these in the UI: it names the route the
+script is reading and whether it counts as one it captures on, so a route check
+that disagrees with the address bar can be seen without opening the console at
+all.
 
 On Firefox the hooks are installed only when `exportFunction` is available to
 carry them across compartments; without it the script declines to hook and says

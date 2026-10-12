@@ -156,6 +156,14 @@ function boot({ firefox = false, exported = false, stored = {}, path = '/i/bookm
   const targets = [];
   const ctx = vm.createContext({
     unsafeWindow: win,
+    // The sandbox a userscript actually runs in has `location` and `document`
+    // as globals, so the harness has to as well. Leaving `location` out made
+    // the load beacon throw into its own catch block and vanish — the script
+    // looked silent here while being fine in Firefox, which is the opposite of
+    // what a harness is for. Same object as `win.location`, so mutating the one
+    // to simulate navigation moves both.
+    location: win.location,
+    document: dom.doc,
     GM_getValue: (k, d) => (values.has(k) ? values.get(k) : d),
     GM_setValue: (k, v) => void values.set(k, v),
     GM_xmlhttpRequest() {},
@@ -267,10 +275,43 @@ test('clicking the pill opens a panel with a pairing code input', () => {
   assert.ok(findAll(panel, (n) => n.tagName === 'BUTTON').length, 'and a way to submit it');
 });
 
+test('the open panel reports the route the script is reading', () => {
+  // "Waiting for bookmarks" while you are looking at the bookmarks timeline is
+  // only meaningful next to the path the script actually saw. Without it, a
+  // broken route check and a page the script simply does not capture on produce
+  // the same pill, and the console is the only way to tell them apart — which
+  // is exactly the position a report came from.
+  const onRoute = boot({ path: '/i/bookmarks' });
+  const offRoute = boot({ path: '/home' });
+
+  const panelText = ({ anchor }) => {
+    const pill = findAll(anchor, (n) => n.className === 'pill')[0];
+    const panel = findAll(anchor, (n) => n.className === 'panel')[0];
+    pill.listeners.click[0]();
+    return findAll(panel, (n) => n.className === 'stat')
+      .map((n) => n.textContent)
+      .join(' ');
+  };
+
+  assert.match(panelText(onRoute), /capturing on \/i\/bookmarks/);
+  assert.match(panelText(offRoute), /not capturing on \/home/);
+});
+
 test('booting is silent on both failure channels', () => {
   const { warnings, errors } = boot();
   assert.deepEqual(warnings, [], `unexpected warnings: ${warnings.join(' | ')}`);
   assert.deepEqual(errors, [], `unexpected errors: ${errors.join(' | ')}`);
+});
+
+test('the load beacon goes to console.log, so the Logs filter shows it', () => {
+  // It was `console.info` and Firefox files that behind a separate "Info" chip,
+  // so two rounds of debugging happened against a console filtered to "Logs"
+  // that could not have shown it.
+  const { messages } = boot();
+  const beacon = messages.find(([, m]) => m.includes('[xitter-dl]') && m.includes('loaded'));
+
+  assert.ok(beacon, 'the beacon should be printed on load');
+  assert.equal(beacon[0], 'log', `the beacon went to ${beacon[0]}, which the Logs filter hides`);
 });
 
 // ── the hooks, and the two ways they can take x.com down ─────────────────────

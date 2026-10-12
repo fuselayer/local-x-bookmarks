@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xitter-dl capture
 // @namespace    https://github.com/example/xitter-dl
-// @version      0.3.0
+// @version      0.3.1
 // @description  Files away the bookmarks X already sent your browser. No API, no extra requests.
 // @author       xitter-dl
 // @match        https://x.com/*
@@ -55,7 +55,7 @@
   // ── configuration ──────────────────────────────────────────────────────────
 
   const CFG = {
-    scriptVersion: '0.3.0',
+    scriptVersion: '0.3.1',
     wireVersion: 1,
 
     // Matched on the operation NAME, never on the rotating doc_id hash. This
@@ -126,9 +126,15 @@
    * the same URL, and reaching across compartments for it is the thing that can
    * throw. The version is printed so a stale reinstall is visible rather than
    * suspected.
+   *
+   * `console.log`, deliberately, not `console.info`. Firefox files `info`
+   * behind its own filter chip, and this line was invisible for two rounds of
+   * debugging because the console was filtered to "Logs" — the one setting
+   * anyone actually uses. A diagnostic hidden by the default view is not a
+   * diagnostic.
    */
   try {
-    console.info('[xitter-dl] ' + CFG.scriptVersion + ' loaded, path ' + location.pathname);
+    console.log('[xitter-dl] ' + CFG.scriptVersion + ' loaded, path ' + location.pathname);
   } catch (_) {}
 
   /**
@@ -662,8 +668,9 @@
       active = now;
       // Once per transition, so the gate's decision is on the record. Without
       // it, "the route is not ours" and "this script never ran" read the same.
+      // `log`, not `info`, for the same reason as the beacon above.
       try {
-        console.info('[xitter-dl] route ' + (now ? 'active' : 'inactive'), pathname());
+        console.log('[xitter-dl] route ' + (now ? 'active' : 'inactive'), pathname());
       } catch (_) {}
       if (now) onActive();
       else onInactive();
@@ -1063,9 +1070,21 @@
 
     const stat = W.document.createElement('div');
     stat.className = 'stat';
+    // The path it is reading is part of the report, not an implementation
+    // detail. "Waiting for bookmarks" while you are looking at the bookmarks
+    // timeline means nothing on its own; next to the path the script actually
+    // saw, it says immediately whether the route check is broken or the page
+    // simply is not the one it captures on.
     stat.textContent =
-      session.pages + ' page(s), ' + session.posts + ' post(s) this session; ' +
-      queue.size() + ' waiting to send.';
+      (routeIsActive() ? 'capturing on ' : 'not capturing on ') +
+      (pathname() || 'an unreadable path') +
+      '. ' +
+      session.pages +
+      ' page(s), ' +
+      session.posts +
+      ' post(s) this session; ' +
+      queue.size() +
+      ' waiting to send.';
     panelEl.appendChild(stat);
   }
 
