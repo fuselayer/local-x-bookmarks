@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xitter-dl capture
 // @namespace    https://github.com/example/xitter-dl
-// @version      0.1.0
+// @version      0.2.0
 // @description  Files away the bookmarks X already sent your browser. No API, no extra requests.
 // @author       xitter-dl
 // @match        https://x.com/*
@@ -14,6 +14,8 @@
 // @grant        unsafeWindow
 // @connect      127.0.0.1
 // @connect      localhost
+// @updateURL    https://raw.githubusercontent.com/fuselayer/local-x-bookmarks/main/userscript/xitter-dl-capture.user.js
+// @downloadURL  https://raw.githubusercontent.com/fuselayer/local-x-bookmarks/main/userscript/xitter-dl-capture.user.js
 // ==/UserScript==
 
 /*
@@ -53,7 +55,7 @@
   // ── configuration ──────────────────────────────────────────────────────────
 
   const CFG = {
-    scriptVersion: '0.1.0',
+    scriptVersion: '0.2.0',
     wireVersion: 1,
 
     // Matched on the operation NAME, never on the rotating doc_id hash. This
@@ -109,6 +111,23 @@
   };
 
   const W = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+  /**
+   * Say so, in the console, the moment this file runs.
+   *
+   * Not gated behind the debug flag, because the question it answers — is the
+   * script on this page at all — is the first one worth asking and the one that
+   * used to be unanswerable. Silence from a capture script is indistinguishable
+   * from a capture script that is working.
+   *
+   * Reads this compartment's `location`, never `unsafeWindow.location`: it is
+   * the same URL, and reaching across compartments for it is the thing that can
+   * throw. The version is printed so a stale reinstall is visible rather than
+   * suspected.
+   */
+  try {
+    console.info('[xitter-dl] ' + CFG.scriptVersion + ' loaded, path ' + location.pathname);
+  } catch (_) {}
 
   /**
    * Hand a function to page code in a form page code can call.
@@ -539,15 +558,42 @@
   let hooked = false;
   let savedOriginals = null;
 
-  /** Is the current route one this script does any work on? */
-  function routeIsActive() {
+  /**
+   * Read `location.pathname` without assuming which compartment can.
+   *
+   * `unsafeWindow.location` is the page's own object, and on Firefox reading a
+   * property off it can be refused across the Xray boundary — the same failure
+   * that produced `Permission denied to access property "capture"`, one object
+   * over. There is no need to reach through it: this compartment's `location`
+   * is the same URL in the same document. So the page window is tried first,
+   * the local one is the fallback, and a refusal is reported instead of being
+   * mistaken for "not our route".
+   *
+   * That mistake is the specific bug this replaces. The gate swallowed every
+   * error and answered `false`, so a compartment refusal looked exactly like an
+   * ordinary page: no pill, no capture, and not one line in the console.
+   */
+  function pathname() {
     try {
       const p = W.location && W.location.pathname;
-      if (typeof p !== 'string') return false;
-      return CFG.activeRoutes.some((r) => p === r || p.startsWith(r + '/'));
-    } catch (_) {
-      return false;
+      if (typeof p === 'string') return p;
+      loudly('unsafeWindow.location.pathname was not a string', p);
+    } catch (e) {
+      loudly('could not read unsafeWindow.location', e);
     }
+    try {
+      return location.pathname;
+    } catch (e) {
+      loudly('could not read location', e);
+      return null;
+    }
+  }
+
+  /** Is the current route one this script does any work on? */
+  function routeIsActive() {
+    const p = pathname();
+    if (typeof p !== 'string') return false;
+    return CFG.activeRoutes.some((r) => p === r || p.startsWith(r + '/'));
   }
 
   function installHooks() {
@@ -612,6 +658,11 @@
       }
       if (now === active) return;
       active = now;
+      // Once per transition, so the gate's decision is on the record. Without
+      // it, "the route is not ours" and "this script never ran" read the same.
+      try {
+        console.info('[xitter-dl] route ' + (now ? 'active' : 'inactive'), pathname());
+      } catch (_) {}
       if (now) onActive();
       else onInactive();
     };
@@ -831,8 +882,15 @@
   // lives.
   function host() {
     try {
-      return (W.document && W.document.body) || null;
-    } catch (_) {
+      const b = W.document && W.document.body;
+      if (b) return b;
+    } catch (e) {
+      loudly('could not read unsafeWindow.document.body', e);
+    }
+    try {
+      return document.body || null;
+    } catch (e) {
+      loudly('could not read document.body', e);
       return null;
     }
   }
@@ -1156,7 +1214,14 @@
     let tries = 0;
     const timer = setInterval(function () {
       tries += 1;
-      if (ensureUi() || tries >= 40) clearInterval(timer);
+      if (ensureUi()) {
+        clearInterval(timer);
+      } else if (tries >= 40) {
+        clearInterval(timer);
+        // Announced, because giving up quietly is what made a missing pill
+        // look like a missing script.
+        loudly('gave up waiting for <body>; no pill was built');
+      }
     }, 250);
 
     const onReady = function () {
