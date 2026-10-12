@@ -362,19 +362,53 @@ test('the bookmarks route does get hooked', () => {
   }
 });
 
+test('leaving the route and coming back re-hooks, rather than staying disarmed', () => {
+  // The bug this exists for: arming was a one-time act guarded by `started`,
+  // while disarming was not. So the hooks came out on the first navigation away
+  // and were never put back — capture died at the first route change and stayed
+  // dead for the life of the document, with the pill still cheerfully on
+  // screen. The poll is driven by hand here; `boot` only registers it.
+  const { win, originals, intervals } = boot({ path: '/i/bookmarks' });
+  const poll = intervals.find((i) => i.ms === 500);
+  assert.ok(poll, 'the route poll should be registered');
+
+  assert.notEqual(win.fetch, originals.fetch, 'armed on first arrival');
+
+  win.location.pathname = '/home';
+  poll.fn();
+  assert.equal(win.fetch, originals.fetch, 'disarmed on leaving');
+
+  win.location.pathname = '/i/bookmarks';
+  poll.fn();
+  assert.notEqual(win.fetch, originals.fetch, 're-armed on returning');
+});
+
 // ── what must NOT happen off the bookmarks route ─────────────────────────────
 
-test('off-route, the script builds no DOM and writes nothing', () => {
+test('off-route, the script appends the pill and nothing else, and patches nothing', () => {
   // The reported failure was "any page that is not the bookmarks page fails to
   // load", and gating only the *hooks* did not fix it: the rest of boot still
-  // ran everywhere — it read storage, built the pill, and installed a
-  // document-wide observer that only disconnected once the pill had been
-  // built. A pill that could not be built left that observer running for the
-  // life of the tab.
+  // ran everywhere — it read storage and installed a document-wide observer
+  // that only disconnected once the pill had been built. A pill that could not
+  // be built left that observer running for the life of the tab.
+  //
+  // Gating the pill as well was the overcorrection. It made the whole script's
+  // visibility depend on one route check, so a check that answered `no` for any
+  // reason produced no pill, no capture, and no message — indistinguishable
+  // from a script that was never installed. The observer is what was dangerous,
+  // and it is gone; one shadow-DOM node is not.
+  //
+  // Synthetic paths only, as above.
   for (const path of ['/', '/home', '/someone/status/1234567890123456789']) {
-    const { dom, values, warnings, errors } = boot({ path });
+    const { dom, values, warnings, errors, win, originals } = boot({ path });
 
-    assert.equal(dom.body.childNodes.length, 0, `nothing may be appended to <body> on ${path}`);
+    assert.equal(dom.body.childNodes.length, 1, `only the pill may be appended on ${path}`);
+    assert.equal(
+      dom.body.childNodes[0].id,
+      'xdl-capture-pill',
+      `the one appended node on ${path} should be the pill anchor`
+    );
+    assert.equal(win.fetch, originals.fetch, `fetch must be untouched on ${path}`);
     assert.equal(values.size, 0, `nothing may be written to storage on ${path}`);
 
     const why = [...warnings, ...errors].join(' | ');

@@ -18,11 +18,11 @@ No API, no OAuth, no scraping service, no cloud, no account, no recurring cost.
 | `crates/cli` | `xdl import / search / show / stats / bridge` |
 | `crates/app` | Tauri v2 shell: window, IPC commands, receiver lifecycle |
 | `ui` | Svelte 5 frontend, three X themes, capture and pairing panel |
-| `userscript` | Capture script — 33 JS tests |
+| `userscript` | Capture script — 34 JS tests |
 | Continuous capture | Not implemented |
 | Media | Not implemented — see [Media](#media-is-not-implemented) |
 
-Rust: `165` tests. JavaScript: `33`.
+Rust: `165` tests. JavaScript: `34`.
 
 ---
 
@@ -107,7 +107,10 @@ DOM.
 1. Start the app and click **Connect browser**. It shows a short code that
    rotates every two minutes.
 2. Install `userscript/xitter-dl-capture.user.js` in Tampermonkey or
-   Violentmonkey.
+   Violentmonkey. Install it from the raw GitHub URL rather than pasting the
+   file: Tampermonkey reads `@updateURL` from the copy it already has, so a
+   pasted script has no URL to poll and will never update itself. Installed from
+   the URL, it keeps itself current whenever `@version` moves.
 3. Open `https://x.com/i/bookmarks`. Click the pill in the bottom-right corner
    and type the code.
 
@@ -118,22 +121,37 @@ that already work.
 
 Imported bookmarks appear in the app as they arrive.
 
-### The script does nothing except on the bookmarks timeline
+### The pill is on every page; capture is not
 
-The whole script is gated to `/i/bookmarks`, not just the hooks. On any other
-x.com route it appends nothing to the DOM, patches nothing, and writes nothing
-to storage. The only things still running are a poll that reads
-`location.pathname` and the Tampermonkey menu registration. Navigate back and it
-starts.
+The pill is attached on every x.com route. It is where capture status and pairing
+state are visible, and a pill that exists on only one route cannot tell you why
+it is missing on another. Capture is gated to `/i/bookmarks`: on any other route
+the script patches nothing and writes nothing to storage. What still runs is the
+Tampermonkey menu registration, the pill, and a poll that reads
+`location.pathname`.
 
-Gating only the *hooks* was not enough. Boot still ran everywhere: it read
-storage, built the pill, and installed a `subtree: true` `MutationObserver` over
-the document that disconnected only once the pill had been built. A pill that
-could not be built left that observer firing on every DOM change for the life of
-the tab — which is what "any page that is not the bookmarks page fails to load"
-turned out to be.
+Gating the pill as well was an overcorrection, and it is what made the pill
+disappear. It widened the route check's blast radius from "the hooks" to "the
+entire script", so a single answer of *no* — for any reason — produced no pill,
+no capture, and nothing in the console. That is indistinguishable from a script
+that was never installed, which is exactly how it got misread.
 
-Two rules fall out of that, and both were learned from the console:
+The route check still decides what is **captured**. It no longer decides what is
+**visible**.
+
+What the gate was originally for: boot ran everywhere and installed a
+`subtree: true` `MutationObserver` over the document, disconnected only once the
+pill had been built. A pill that could not be built left that observer firing on
+every DOM change for the life of the tab — which is what "any page that is not
+the bookmarks page fails to load" turned out to be. The observer is gone;
+waiting for `<body>` is a bounded poll that always stops.
+
+Hooks are armed on arrival at the timeline, removed on leaving it, and armed
+again on return. Arming used to be one-time while disarming was not, so capture
+died at the first navigation away and never came back.
+
+Three rules fall out of all that, and every one of them was learned from the
+console:
 
 - **Nothing structured is handed to the userscript manager.** Values crossing
   that boundary are primitives; the queue and the dedupe memory are stored as
@@ -143,6 +161,10 @@ Two rules fall out of that, and both were learned from the console:
 - **No event-listener options object.** Firefox reads `capture` off that
   dictionary in the *page's* compartment and refuses one built in the script's:
   `Permission denied to access property "capture"`.
+- **A failure is announced.** The script prints `[xitter-dl] <version> loaded`
+  on every page, whether or not debug logging is on, and anything that stops it
+  working goes to `console.error` with the same prefix. Silence from a capture
+  script is otherwise indistinguishable from a capture script that is working.
 
 On Firefox the hooks are installed only when `exportFunction` is available to
 carry them across compartments; without it the script declines to hook and says

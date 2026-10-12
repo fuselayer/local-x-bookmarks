@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xitter-dl capture
 // @namespace    https://github.com/example/xitter-dl
-// @version      0.2.0
+// @version      0.3.0
 // @description  Files away the bookmarks X already sent your browser. No API, no extra requests.
 // @author       xitter-dl
 // @match        https://x.com/*
@@ -55,7 +55,7 @@
   // ── configuration ──────────────────────────────────────────────────────────
 
   const CFG = {
-    scriptVersion: '0.2.0',
+    scriptVersion: '0.3.0',
     wireVersion: 1,
 
     // Matched on the operation NAME, never on the rotating doc_id hash. This
@@ -91,18 +91,20 @@
     // are the problem and the UI is exonerated.
     hookNetwork: true,
 
-    // Routes this script does any work on. Everywhere else it does nothing to
-    // the page: no DOM, no observers, no hooks, and not one write to storage.
-    // What still runs is the Tampermonkey menu registration and a poll that
-    // reads `location.pathname`; neither touches the page.
+    // Routes this script captures on. Everywhere else it patches nothing and
+    // writes nothing to storage. What still runs is the Tampermonkey menu
+    // registration, the pill, and a poll that reads `location.pathname`.
     //
     // Reported symptom: x.com failed to load on any route that was not the
     // bookmarks timeline. The hooks were already gated to the timeline, but the
     // *rest* of the script was not — it read storage and installed a
     // document-wide observer on every route, and a boot failure left that
-    // observer running for the life of the tab. Gating the whole script, not
-    // just the hooks, is what makes every other route as if it were not
-    // installed.
+    // observer running for the life of the tab. Killed the observer, bounded
+    // the wait for `<body>`, and stopped the off-route storage *writes*.
+    //
+    // Gating the pill as well was the overcorrection born of that, and it is
+    // what broke the pill: see `boot`. This list decides what is *captured*,
+    // not what is *visible*.
     //
     // This is also the seam for capturing a bookmark at the moment it is made,
     // which happens on any route and will widen this list rather than remove it.
@@ -868,6 +870,10 @@
         ? 'app not running'
         : kind === 'error'
         ? (detail && detail.error) || 'error'
+        : kind === 'idle'
+        ? 'waiting for bookmarks'
+        : kind === 'hooks-off'
+        ? 'hooks off'
         : kind;
     render();
   }
@@ -1117,13 +1123,15 @@
   }
 
   let started = false;
+  let canHook = false;
 
   /**
-   * Everything the script does, and none of it runs off an active route.
+   * One-time, per-document setup. Runs on the first active route.
    *
-   * Runs once. Leaving the route and coming back does not re-run it, because
-   * the intervals set up here are per-document, not per-route; re-running would
-   * stack a second flush timer and a second route poll on every visit.
+   * Leaving the route and coming back does not re-run this, because the
+   * interval set up here is per-document, not per-route; re-running would stack
+   * a second flush timer on every visit. Arming and disarming the hooks is
+   * per-route, and lives in `armCapture`/`disarmCapture` below.
    */
   function startCapture() {
     if (started) return;
@@ -1134,51 +1142,30 @@
     log.on = !!store.get('debug', false);
 
     try {
-      // Hooking is decided at runtime, not just from CFG, for two reasons.
+      // Whether hooking is safe is decided at runtime, not from CFG.
       //
-      // 1. On Firefox the hooks are only safe when `exportFunction` exists to
-      //    carry them across compartments. Without it, patching `fetch` stops
-      //    x.com loading entirely — every request the page makes goes through
-      //    the wrapper. Refusing to hook is strictly better than taking the
-      //    site down, so the check is a gate, not a warning.
-      // 2. The stored flag lets the Tampermonkey menu turn the hooks off
-      //    without editing this file, which matters precisely when the page is
-      //    too broken to reach the pill.
+      // On Firefox the hooks are only safe when `exportFunction` exists to
+      // carry them across compartments. Without it, patching `fetch` stops
+      // x.com loading entirely — every request the page makes goes through the
+      // wrapper. Refusing to hook is strictly better than taking the site down,
+      // so the check is a gate, not a warning.
+      //
+      // The other half of the decision — the stored on/off flag that lets the
+      // Tampermonkey menu turn the hooks off without editing this file, which
+      // matters precisely when the page is too broken to reach the pill — is
+      // applied per route in `armCapture`, because it has to be re-read every
+      // time the route comes back.
       const isFirefox = /firefox|fxios/i.test(W.navigator && W.navigator.userAgent);
       const canExport = typeof exportFunction === 'function';
-      const wanted = store.get('hookNetwork', CFG.hookNetwork);
-      const allowed = ! (isFirefox && ! canExport);
+      canHook = ! (isFirefox && ! canExport);
 
-      if (wanted && allowed) {
-        installHooks();
-      } else if (!allowed) {
-        setStatus('error', {
-          error: 'firefox: cannot patch fetch safely',
-        });
+      if (!canHook) {
         loudly(
           'not hooking fetch',
           'Firefox without `exportFunction`: assigning a sandbox function to ' +
             'window.fetch is what stops x.com loading. Capture is off; the page is fine.'
         );
-      } else {
-        log.info('hooks off by choice');
       }
-
-      // Reflect stored state before anything is captured. The "cannot hook"
-      // case keeps the error status set above rather than overwriting it: the
-      // reason capture is off matters more than the pairing state.
-      if (!allowed) {
-        // status already set
-      } else if (store.get('secret', null)) {
-        setStatus('app-not-running');
-      } else {
-        setStatus('needs-pairing');
-      }
-
-      attachUi();
-
-      // Anything left over from a previous session goes now, if the app is up.
-      if (queue.size() > 0) scheduleFlush();
 
       // A pairing code is short-lived; if the user pairs while we are idle this
       // catches it on the next tick.
@@ -1190,8 +1177,42 @@
     }
   }
 
-  function stopCapture() {
+  /**
+   * Arm capture for the route we are on now, and say so on the pill.
+   *
+   * Runs on *every* activation, not only the first, because `disarmCapture`
+   * takes the hooks back out when the route is left. Arming once meant that
+   * navigating away from the bookmarks timeline and back left the hooks removed
+   * for the rest of the document's life: capture stopped at the first
+   * navigation and never resumed, which from the outside looks exactly like X
+   * having nothing new to send.
+   */
+  function armCapture() {
+    try {
+      const wanted = store.get('hookNetwork', CFG.hookNetwork);
+
+      if (!canHook) {
+        // The reason capture is off matters more than the pairing state, so
+        // this case sets the error rather than falling through to it.
+        setStatus('error', { error: 'firefox: cannot patch fetch safely' });
+      } else if (wanted) {
+        installHooks();
+        setStatus(store.get('secret', null) ? 'app-not-running' : 'needs-pairing');
+      } else {
+        log.info('hooks off by choice');
+        setStatus('hooks-off');
+      }
+
+      // Anything left over from a previous session goes now, if the app is up.
+      if (queue.size() > 0) scheduleFlush();
+    } catch (e) {
+      loudly('arm failed', e);
+    }
+  }
+
+  function disarmCapture() {
     removeHooks();
+    setStatus('idle');
   }
 
   /**
@@ -1245,9 +1266,27 @@
     // when a page will not load, so it must not depend on one having loaded.
     menus();
 
-    // Everything else waits for a route this script actually works on. On any
-    // other x.com page the poll inside `watchRoute` is the only thing running.
-    watchRoute(startCapture, stopCapture);
+    // The pill is attached on every route too, and for the same reason. It is
+    // where capture status and pairing state are visible, and a pill that only
+    // exists on one route cannot tell you why it is missing on another.
+    //
+    // Gating it was the regression. This call used to sit behind the route
+    // check, which widened that check's blast radius from "the hooks" to "the
+    // entire script": one answer of `no`, for any reason, and there was no pill,
+    // no capture and nothing in the console — the exact symptom of a script that
+    // was never installed. It builds one shadow-DOM node and nothing else, and
+    // the document-wide observer that once made attaching it dangerous is gone.
+    attachUi();
+
+    // Capture itself still waits for a route this script actually works on, and
+    // is re-armed every time that route comes back.
+    watchRoute(
+      () => {
+        startCapture();
+        armCapture();
+      },
+      disarmCapture
+    );
   }
 
   boot();
