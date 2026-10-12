@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         xitter-dl capture
 // @namespace    https://github.com/example/xitter-dl
-// @version      0.3.2
+// @version      0.3.3
 // @description  Files away the bookmarks X already sent your browser. No API, no extra requests.
 // @author       xitter-dl
 // @match        https://x.com/*
@@ -55,7 +55,7 @@
   // ── configuration ──────────────────────────────────────────────────────────
 
   const CFG = {
-    scriptVersion: '0.3.2',
+    scriptVersion: '0.3.3',
     wireVersion: 1,
 
     // Matched on the operation NAME, never on the rotating doc_id hash. This
@@ -330,6 +330,49 @@
     refused: 0,
   };
 
+  // ── what the hooks actually saw ────────────────────────────────────────────
+  //
+  // These counters are the whole diagnosis, and not having them is why capture
+  // failing silently has cost so many rounds:
+  //
+  //   `fetches` stays 0        the wrapper is not in the chain at all — the page
+  //                            held a reference to the original `fetch`, or the
+  //                            assignment never took effect.
+  //   `fetches` climbs,
+  //   `matched` stays 0        the wrapper is in the chain and the matcher is
+  //                            wrong; `lastOp` names what it was handed.
+  //   `matched` climbs          the hook is fine and the fault is downstream.
+  //
+  // Shown in the pill, so none of it requires the console.
+  const seen = {
+    fetches: 0,
+    matched: 0,
+    lastOp: null,
+    unmatchedOp: null,
+    oddUrl: null,
+  };
+
+  /**
+   * Count a request the hooks handled. Returns true if it is one to read.
+   */
+  function noteRequest(url) {
+    seen.fetches++;
+    const op = operationName(url);
+    if (op === null) {
+      // A GraphQL-looking URL that `operationName` refused is what X moving the
+      // endpoint looks like, so keep the first one as evidence.
+      if (!seen.oddUrl && url.indexOf('graphql') !== -1) seen.oddUrl = url;
+      return false;
+    }
+    seen.lastOp = op;
+    if (CFG.opPattern.test(op)) {
+      seen.matched++;
+      return true;
+    }
+    if (!seen.unmatchedOp) seen.unmatchedOp = op;
+    return false;
+  }
+
   // ── URL and body inspection (pure) ─────────────────────────────────────────
 
   function urlOf(input) {
@@ -488,7 +531,10 @@
   function hookFetch() {
     try {
       const original = W.fetch;
-      if (typeof original !== 'function') return;
+      if (typeof original !== 'function') {
+        loudly('window.fetch was not a function, so there was nothing to hook');
+        return;
+      }
 
       // `intoPage` matters more here than anywhere else: if the page cannot
       // call this, x.com cannot make a single request.
@@ -496,7 +542,7 @@
         const promise = original.apply(this, arguments);
         try {
           const url = urlOf(input);
-          if (isBookmarkOperation(url)) {
+          if (noteRequest(url)) {
             promise
               .then(function (response) {
                 try {
@@ -518,14 +564,20 @@
         return promise;
       });
     } catch (e) {
-      log.warn('could not hook fetch', e);
+      // `loudly`, not `log.warn`. A hook that quietly fails to install is
+      // capture that quietly does not happen, which is the exact failure this
+      // script has spent the longest time concealing from itself.
+      loudly('could not hook fetch', e);
     }
   }
 
   function hookXhr() {
     try {
       const proto = W.XMLHttpRequest && W.XMLHttpRequest.prototype;
-      if (!proto) return;
+      if (!proto) {
+        loudly('XMLHttpRequest was not there to hook');
+        return;
+      }
 
       const originalOpen = proto.open;
       const originalSend = proto.send;
@@ -533,6 +585,7 @@
       proto.open = intoPage(function (method, url) {
         try {
           this.__xdlUrl = url;
+          noteRequest(url);
         } catch (_) {}
         return originalOpen.apply(this, arguments);
       });
@@ -556,7 +609,7 @@
         return originalSend.apply(this, arguments);
       });
     } catch (e) {
-      log.warn('could not hook XMLHttpRequest', e);
+      loudly('could not hook XMLHttpRequest', e);
     }
   }
 
@@ -629,7 +682,15 @@
     hookFetch();
     hookXhr();
     hooked = true;
-    log.info('hooks installed');
+    // Unconditional, and on `log` so the Logs filter shows it. "The hooks went
+    // in" is the fact every other diagnosis is relative to, and it used to be a
+    // debug-gated line: invisible in exactly the situation where it mattered.
+    try {
+      console.log(
+        '[xitter-dl] hooks installed, exportFunction ' +
+          (typeof exportFunction === 'function' ? 'available' : 'absent')
+      );
+    } catch (_) {}
   }
 
   function removeHooks() {
@@ -1094,6 +1155,23 @@
       queue.size() +
       ' waiting to send.';
     panelEl.appendChild(stat);
+
+    // What the hooks saw, which is the only way to tell "the wrapper is not in
+    // the chain" from "the wrapper is in the chain and the matcher is wrong"
+    // without another round trip through the console.
+    const net = W.document.createElement('div');
+    net.className = 'stat';
+    net.textContent =
+      seen.fetches +
+      ' request(s) through the hooks, ' +
+      seen.matched +
+      ' bookmark operation(s). ' +
+      (seen.lastOp
+        ? 'Last GraphQL op: ' + seen.lastOp + '.'
+        : seen.oddUrl
+        ? 'A GraphQL-looking URL did not parse: ' + seen.oddUrl
+        : 'No GraphQL request has passed through the hooks.');
+    panelEl.appendChild(net);
   }
 
   function render() {

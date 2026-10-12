@@ -295,6 +295,12 @@ test('the open panel reports the route the script is reading', () => {
 
   assert.match(panelText(onRoute), /capturing on \/i\/bookmarks/);
   assert.match(panelText(offRoute), /not capturing on \/home/);
+
+  // The counter line is the other half of the diagnosis. Without it, "the
+  // wrapper is not in the chain" and "the wrapper is in the chain and the
+  // matcher is wrong" look identical from outside: no captures, no errors.
+  assert.match(panelText(onRoute), /0 request\(s\) through the hooks, 0 bookmark operation\(s\)/);
+  assert.match(panelText(onRoute), /No GraphQL request has passed through the hooks/);
 });
 
 test('booting is silent on both failure channels', () => {
